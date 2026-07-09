@@ -100,7 +100,8 @@ async def test_request_id_header_is_not_duplicated(client: AsyncClient) -> None:
 
 
 async def test_unknown_route_uses_the_envelope(client: AsyncClient) -> None:
-    response = await client.get("/v1/nope")
+    # Not under /v1: that prefix is the OpenAI proxy's catch-all and never 404s here.
+    response = await client.get("/nope")
     error = response.json()["error"]
 
     assert response.status_code == 404
@@ -136,7 +137,7 @@ async def test_validation_error_reports_a_missing_field(client: AsyncClient) -> 
 async def test_errors_never_use_fastapis_detail_key(client: AsyncClient) -> None:
     """FastAPI's default {"detail": ...} would break provider SDK error parsing."""
     for path, method in (
-        ("/v1/nope", "GET"),
+        ("/nope", "GET"),
         ("/_test/bad-request", "GET"),
         ("/_test/boom", "GET"),
     ):

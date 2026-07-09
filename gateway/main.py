@@ -10,6 +10,8 @@ import time
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+import anyio.to_thread
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -19,10 +21,16 @@ from gateway.errors import register_exception_handlers
 from gateway.health import HealthRegistry
 from gateway.logging import configure_logging, get_logger
 from gateway.middleware.request_context import (
+    GATEWAY_REQUEST_ID_HEADER,
+    OPTIMIZATION_HEADER,
     PROCESS_TIME_HEADER,
     REQUEST_ID_HEADER,
+    TOKENS_SAVED_HEADER,
     RequestContextMiddleware,
 )
+from gateway.optimizers import build_pipeline
+from gateway.providers import OpenAIProvider, ProviderRegistry, ProxyService
+from gateway.tokenizers import TokenCounterFactory
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -40,6 +48,37 @@ No LLM is used to optimize. No content is summarized. Meaning is preserved.
 """
 
 
+def build_upstream_client(settings: Settings) -> httpx.AsyncClient:
+    """One connection pool for the whole process.
+
+    A client per request would open a new TCP+TLS connection to the provider every
+    time, adding a full handshake to every call. Redirects are not followed: a
+    transparent proxy hands the 3xx to the caller and lets the SDK decide.
+    """
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=settings.upstream_connect_timeout_seconds,
+            read=settings.upstream_read_timeout_seconds,
+            write=settings.upstream_write_timeout_seconds,
+            pool=settings.upstream_pool_timeout_seconds,
+        ),
+        limits=httpx.Limits(
+            max_connections=settings.upstream_max_connections,
+            max_keepalive_connections=settings.upstream_max_keepalive_connections,
+        ),
+        follow_redirects=False,
+    )
+
+
+def build_provider_registry(settings: Settings) -> ProviderRegistry:
+    """Register every configured provider. Phase 6 adds Anthropic here."""
+    registry = ProviderRegistry()
+    registry.register(
+        OpenAIProvider(base_url=settings.openai_base_url, api_key=settings.openai_api_key)
+    )
+    return registry
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Own the lifecycle of every long-lived resource the app holds."""
@@ -47,8 +86,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.started_at = time.monotonic()
     app.state.health = HealthRegistry(timeout_seconds=settings.health_check_timeout_seconds)
+    app.state.providers = build_provider_registry(settings)
+    app.state.upstream_client = build_upstream_client(settings)
+    app.state.proxy = ProxyService(app.state.upstream_client)
+
+    app.state.token_counters = TokenCounterFactory.from_settings(settings)
+    app.state.pipeline = build_pipeline(settings, app.state.token_counters)
+
+    # tiktoken fetches its encoding over the network on first use. Do it now, in a
+    # worker thread, so the cost never lands inside a user's request. A failure is
+    # not fatal: the factory falls back to approximate counting.
+    exact_tokens = await anyio.to_thread.run_sync(app.state.token_counters.prewarm)
 
     # Phase 4 registers the Postgres probe here; Phase 8 registers Redis.
+    # Provider reachability is deliberately not probed: it would bill the
+    # account and burn rate limit on every readiness check.
 
     logger.info(
         "application_started",
@@ -57,11 +109,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         environment=settings.environment.value,
         docs_enabled=settings.docs_enabled,
         probes=app.state.health.names,
+        providers=app.state.providers.names,
+        optimization_enabled=settings.optimization_enabled,
+        exact_token_counting=exact_tokens,
     )
 
     try:
         yield
     finally:
+        await app.state.upstream_client.aclose()
         logger.info("application_stopped", service=settings.app_name)
 
 
@@ -92,7 +148,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
-            expose_headers=[REQUEST_ID_HEADER, PROCESS_TIME_HEADER],
+            expose_headers=[
+                REQUEST_ID_HEADER,
+                GATEWAY_REQUEST_ID_HEADER,
+                PROCESS_TIME_HEADER,
+                OPTIMIZATION_HEADER,
+                TOKENS_SAVED_HEADER,
+            ],
         )
     app.add_middleware(RequestContextMiddleware, quiet_paths=QUIET_PATHS)
 

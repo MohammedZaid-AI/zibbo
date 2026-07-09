@@ -25,19 +25,31 @@ Nothing else changes.
 
 ## Status
 
-Phase 1 of 8 — foundations. The gateway currently serves health endpoints; the
-proxy and optimizers land in Phases 2 and 3.
+Phase 3 of 8. The gateway proxies OpenAI transparently, streaming included, and
+deterministically optimizes eligible request payloads before forwarding them.
 
 | Phase | Scope | State |
 |---|---|---|
 | 1 | App skeleton, config, logging, errors, health, Docker | done |
-| 2 | OpenAI-compatible passthrough | next |
-| 3 | HTML / JSON / text optimizers | |
-| 4 | Token + cost analytics (Postgres) | |
+| 2 | OpenAI-compatible proxy, provider layer, streaming | done |
+| 3 | Transformation pipeline: HTML / JSON / text | done |
+| 4 | Token + cost analytics (Postgres) | next |
 | 5 | Next.js dashboard | |
 | 6 | Anthropic-compatible endpoint | |
 | 7 | PDF / DOCX / CSV optimizers | |
-| 8 | Redis cache, streaming, benchmarks | |
+| 8 | Redis cache, response caching, benchmarks | |
+
+## What it saves
+
+Measured on generated corpora with `python -m benchmarks.run`, reproducible offline:
+
+| Document | Bytes | Tokens | Token reduction |
+|---|---|---|---|
+| News article (ads, banners, nav) | 12.4 KB → 4.9 KB | 3,594 → 1,076 | **70.1%** |
+| Documentation page | 14.0 KB → 7.2 KB | 4,302 → 1,837 | **57.3%** |
+| Pretty-printed JSON API response | 41.1 KB → 19.2 KB | 9,569 → 5,708 | **40.4%** |
+| Encyclopedia article | 42.0 KB → 32.4 KB | 11,101 → 7,649 | **31.1%** |
+| Plain-text notes | 16.1 KB → 13.2 KB | 3,461 → 2,887 | **16.6%** |
 
 ## Quick start
 
@@ -60,10 +72,49 @@ cp .env.example .env
 python -m gateway               # http://localhost:8000
 ```
 
+## Using it
+
+Point any OpenAI client at the gateway. Nothing else changes — your key is
+forwarded, so requests still bill your account.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key="sk-...", base_url="http://localhost:8000/v1")
+
+completion = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Say hello."}],
+)
+
+# Streaming works identically.
+for chunk in client.chat.completions.create(model="gpt-4o-mini", messages=[...], stream=True):
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+Every `/v1` endpoint is proxied, not just chat completions — including ones OpenAI
+has not shipped yet. Upstream errors, rate-limit headers, and request ids reach you
+unchanged. The full list of intentional deviations is in
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+
+Paste a web page into a message and the gateway strips the scripts, styles,
+navigation, cookie banners, ads and hidden elements, converts what remains to clean
+Markdown, and forwards that. Your headings, lists, tables and code blocks survive.
+Nothing is summarized. Each response tells you what happened:
+
+```
+x-llmgateway-optimization: applied
+x-llmgateway-tokens-saved: 110
+```
+
+Set `LLMGATEWAY_OPTIMIZATION_ENABLED=false` for a pure passthrough. Design and
+guarantees: [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
+
 ## Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
+| any | `/v1/*` | OpenAI-compatible proxy |
 | `GET` | `/health` | Service summary: version, environment, uptime |
 | `GET` | `/health/live` | Liveness. Touches no dependency, never fails while the process runs |
 | `GET` | `/health/ready` | Readiness. Probes every dependency; `503` if any is unhealthy |
@@ -108,8 +159,11 @@ between your service and this one.
 ```bash
 pytest                          # full suite
 pytest -m integration           # ASGI-level tests only
+pytest -m compat                # drives the gateway with the real OpenAI SDK
+pytest -m property              # determinism and idempotency invariants
 ruff check . && ruff format --check .
 mypy gateway
+python -m benchmarks.run        # optimization benchmarks
 ```
 
 ## Architecture
@@ -117,18 +171,38 @@ mypy gateway
 ```
 gateway/
   api/          HTTP surface — routers, dependencies, wire schemas
-  providers/    Upstream clients (OpenAI, Anthropic)
+  providers/    base.py       Provider ABC: URL, auth, stream detection
+                proxy.py      Transport: buffered + streaming relay
+                headers.py    Hop-by-hop denylist
+                openai.py     OpenAI (~10 lines of real logic)
+                registry.py   Name -> provider lookup
+  optimizers/   pipeline.py   The one call the gateway makes
+                policy.py     May this request be transformed?
+                detector.py   What is this content, really?
+                extraction.py Where is the text in this schema?
+                registry.py   Which transformer handles it?
+                base.py       Transformer ABC
+                models.py     Report, result, content types
+                transformers/ html.py, json.py, text.py
+  tokenizers/   tiktoken with an offline heuristic fallback
   middleware/   Request context, timing, access log
-  optimizers/   Deterministic content optimizers, one module per format
-  analytics/    Token and cost accounting
-  tokenizers/   Per-provider token counting
-  storage/      Postgres repositories, Redis cache
+  analytics/    Token and cost accounting            (Phase 4)
+  storage/      Postgres repositories, Redis cache   (Phase 4, 8)
   utils/        Shared helpers
   config.py     Typed settings from the environment
   errors.py     Exception hierarchy and the wire error format
   health.py     Pluggable health-check registry
   main.py       Application factory
+benchmarks/     Reproducible, offline optimization benchmarks
 ```
 
-Each optimizer is isolated behind a common protocol: supporting a new format means
-adding one module, not editing the pipeline.
+**Providers.** `Provider` translates (where a path lives upstream, how to
+authenticate, whether a request wants a stream). `ProxyService` transports (sockets,
+streaming, error mapping). Adding Anthropic, Gemini, Groq, Mistral or Ollama means
+writing one `Provider` subclass — every provider inherits streaming and header
+preservation.
+
+**Optimizers.** The gateway never imports a transformer. It calls
+`pipeline.transform(request)`; the registry selects a transformer by what the content
+*is*. Adding PDF, DOCX, CSV, XML, PII masking or deduplication means adding one module
+and one registration line. See [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).

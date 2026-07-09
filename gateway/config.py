@@ -12,7 +12,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Any, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gateway import __version__
@@ -38,6 +38,19 @@ class LogFormat(StrEnum):
 
     JSON = "json"
     CONSOLE = "console"
+
+
+class TokenizerBackend(StrEnum):
+    """Which token counter to use.
+
+    ``AUTO`` prefers tiktoken and silently falls back to the heuristic counter if
+    its encoding files cannot be loaded — they are fetched over the network on
+    first use, which must never fail a request.
+    """
+
+    AUTO = "auto"
+    TIKTOKEN = "tiktoken"
+    HEURISTIC = "heuristic"
 
 
 class LogLevel(StrEnum):
@@ -81,13 +94,53 @@ class Settings(BaseSettings):
     # below ever runs.
     cors_allow_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
-    # -- Upstream providers ------------------------------------------------
+    # -- Upstream transport ------------------------------------------------
     upstream_connect_timeout_seconds: Annotated[float, Field(gt=0)] = 10.0
     upstream_read_timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
+    upstream_write_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0
+    upstream_pool_timeout_seconds: Annotated[float, Field(gt=0)] = 10.0
+    upstream_max_connections: Annotated[int, Field(gt=0)] = 200
+    upstream_max_keepalive_connections: Annotated[int, Field(gt=0)] = 50
+
+    # -- Providers ---------------------------------------------------------
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: SecretStr | None = None
+    """Fallback credential. A caller's own ``Authorization`` header always wins,
+    which is what lets an existing app switch over by changing only its base URL."""
 
     # -- Backing services (wired up in later phases) -----------------------
     database_url: str | None = None
     redis_url: str | None = None
+
+    # -- Optimization ------------------------------------------------------
+    optimization_enabled: bool = True
+
+    optimization_max_body_bytes: Annotated[int, Field(gt=0)] = 8_000_000
+    """Bodies above this are forwarded untouched rather than parsed."""
+
+    optimization_offload_threshold_bytes: Annotated[int, Field(gt=0)] = 131_072
+    """Above this, transformation runs in a worker thread. Parsing a multi-megabyte
+    HTML document takes tens of milliseconds and would otherwise stall the event
+    loop for every other in-flight request."""
+
+    optimization_min_segment_chars: Annotated[int, Field(ge=0)] = 0
+    """Segments shorter than this are left alone; the overhead exceeds the saving."""
+
+    # Off by default: an empty list can be semantically meaningful (`"tools": []`
+    # means something different from an absent key), so removing it is opt-in.
+    json_remove_empty_containers: bool = False
+
+    # Off by default: collapsing runs of spaces destroys code indentation and
+    # Markdown table alignment, which are meaning, not noise.
+    text_collapse_inline_whitespace: bool = False
+    text_dedupe_consecutive_paragraphs: bool = True
+
+    html_preserve_links: bool = True
+    html_preserve_images: bool = True
+
+    # -- Tokenizer ---------------------------------------------------------
+    tokenizer: TokenizerBackend = TokenizerBackend.AUTO
+    tokenizer_default_encoding: str = "o200k_base"
 
     # -- Health ------------------------------------------------------------
     health_check_timeout_seconds: Annotated[float, Field(gt=0)] = 2.0
@@ -112,6 +165,11 @@ class Settings(BaseSettings):
             except json.JSONDecodeError as exc:
                 raise ValueError(f"cors_allow_origins is not valid JSON: {exc}") from exc
         return [item.strip() for item in stripped.split(",") if item.strip()]
+
+    @field_validator("openai_base_url")
+    @classmethod
+    def _strip_trailing_slash(cls, value: str) -> str:
+        return value.rstrip("/")
 
     @field_validator("root_path")
     @classmethod

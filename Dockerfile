@@ -22,6 +22,13 @@ RUN mkdir -p gateway && touch gateway/__init__.py && pip install .
 COPY gateway ./gateway
 RUN pip install --no-deps .
 
+# tiktoken downloads its BPE files on first use. Doing that here means the runtime
+# never reaches for the network — a cold container that cannot resolve the CDN
+# would otherwise fall back to approximate token counts on its first request.
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken
+RUN mkdir -p /opt/tiktoken \
+    && python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')"
+
 # --------------------------------------------------------------------------
 # Runtime — no build tooling, no source tree, no root.
 # --------------------------------------------------------------------------
@@ -30,13 +37,20 @@ FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken \
     LLMGATEWAY_HOST=0.0.0.0 \
     LLMGATEWAY_PORT=8000
+
+# libxml2/libxslt runtime libraries for lxml's C extension.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libxml2 libxslt1.1 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 gateway \
     && useradd --system --uid 1001 --gid gateway --no-create-home gateway
 
 COPY --from=builder --chown=root:root /opt/venv /opt/venv
+COPY --from=builder --chown=root:root /opt/tiktoken /opt/tiktoken
 
 WORKDIR /app
 COPY --chown=root:root gateway ./gateway

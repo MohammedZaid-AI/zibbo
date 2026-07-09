@@ -13,6 +13,9 @@ services:
       LLMGATEWAY_LOG_LEVEL: INFO
       LLMGATEWAY_LOG_FORMAT: console
       LLMGATEWAY_CORS_ALLOW_ORIGINS: http://localhost:3000
+      LLMGATEWAY_OPENAI_BASE_URL: ${LLMGATEWAY_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # Optional. Callers that send their own Authorization header override it.
+      LLMGATEWAY_OPENAI_API_KEY: ${LLMGATEWAY_OPENAI_API_KEY:-}
       # Consumed from Phase 4 (Postgres) and Phase 8 (Redis) onward.
       LLMGATEWAY_DATABASE_URL: postgresql://llmgateway:llmgateway@postgres:5432/llmgateway
       LLMGATEWAY_REDIS_URL: redis://redis:6379/0
