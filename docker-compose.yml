@@ -1,0 +1,57 @@
+name: llmgateway
+
+services:
+  gateway:
+    build:
+      context: .
+      target: runtime
+    ports:
+      - "${LLMGATEWAY_PORT:-8000}:8000"
+    environment:
+      LLMGATEWAY_ENVIRONMENT: development
+      LLMGATEWAY_DEBUG: "true"
+      LLMGATEWAY_LOG_LEVEL: INFO
+      LLMGATEWAY_LOG_FORMAT: console
+      LLMGATEWAY_CORS_ALLOW_ORIGINS: http://localhost:3000
+      # Consumed from Phase 4 (Postgres) and Phase 8 (Redis) onward.
+      LLMGATEWAY_DATABASE_URL: postgresql://llmgateway:llmgateway@postgres:5432/llmgateway
+      LLMGATEWAY_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: llmgateway
+      POSTGRES_PASSWORD: llmgateway
+      POSTGRES_DB: llmgateway
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llmgateway -d llmgateway"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
