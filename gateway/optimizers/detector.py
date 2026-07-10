@@ -139,24 +139,57 @@ class XmlSniffer:
         return None
 
 
+# Markdown code regions. Anything inside them is a *quotation* of code, never code
+# the user is asking the model to treat as content.
+_FENCED_CODE_RE: Final = re.compile(r"(?P<fence>```|~~~).*?(?P=fence)", re.DOTALL)
+_INLINE_CODE_RE: Final = re.compile(r"`[^`\n]*`")
+
+# `<!-- ... -->` and stray whitespace may legitimately precede a document's first tag.
+_LEADING_NOISE_RE: Final = re.compile(r"\A(?:\s|<!--.*?-->)*", re.DOTALL)
+_OPENS_WITH_TAG_RE: Final = re.compile(r"\A<\s*[a-zA-Z][a-zA-Z0-9]{0,14}\b")
+
+# Markup so dense it cannot be prose, whatever it starts with.
+_DENSE_MARKUP_RATIO: Final = 0.5
+
+
+def strip_code_regions(content: str) -> str:
+    """Blank out fenced and inline code so quoted markup is not counted as markup."""
+    without_fences = _FENCED_CODE_RE.sub(" ", content)
+    return _INLINE_CODE_RE.sub(" ", without_fences)
+
+
 class HtmlSniffer:
-    """Structural detection: a doctype, a document element, or closed tag pairs.
+    """Is this markup *used as content*, or markup being *talked about*?
 
-    The signal is **closing tags**, not tag variety. Markdown — which is what the
-    HTML transformer emits — has none, so its output can never be re-detected as
-    HTML, which is exactly what makes the pipeline idempotent.
+    Counting tags cannot answer that. Real documents and prose-about-HTML overlap
+    on every count-based measure — a generated encyclopedia article has a markup
+    density of 0.155, and the sentence "To make a paragraph use ``<p>text</p>``,
+    to bold use ``<b>text</b>``" has 0.119. A threshold between them does not exist.
 
-    Requiring *two* closing tags also protects meaning. A user asking "what does
-    ``<p>hello</p>`` do?" is writing prose about markup, not sending markup. Treat
-    that as HTML and the transformer would rewrite their question to "what does
-    hello do?" — a semantic corruption, and the one thing this pipeline promises
-    never to commit. One closing tag is prose; a document has many.
+    What does separate them is where the markup *starts*. A pasted HTML document
+    begins with a tag. Prose about HTML begins with words. So:
+
+    1. Code regions are removed first. Markup inside a fenced block or backticks is
+       a quotation — documentation, a question, a bug report — never content.
+    2. A doctype or ``<html>``/``<body>``/``<head>`` settles it: that is a document.
+    3. Otherwise the content must *open* with a tag and close at least two, or be
+       more than half markup by character count.
+
+    Everything else is prose, and prose is normalized rather than rewritten. The
+    failure this avoids is silent: treat "what does ``<p>hello</p>`` do?" as HTML
+    and the user's question becomes "what does hello do?".
+
+    A side effect the pipeline depends on: Markdown has no closing tags, so the
+    HTML transformer's own output is never re-detected as HTML. That is what makes
+    ``pipeline(pipeline(x)) == pipeline(x)`` exact.
     """
 
     name: ClassVar[str] = "html-structure"
 
     _DOCTYPE_RE: ClassVar[re.Pattern[str]] = re.compile(r"<!doctype\s+html", re.IGNORECASE)
-    _TAG_RE: ClassVar[re.Pattern[str]] = re.compile(r"<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9]{0,14})\b")
+    _TAG_RE: ClassVar[re.Pattern[str]] = re.compile(
+        r"<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9]{0,14})\b[^>]*>"
+    )
 
     # Their presence means "this is a document", regardless of how it is closed.
     _DOCUMENT_TAGS: ClassVar[frozenset[str]] = frozenset({"html", "body", "head"})
@@ -176,25 +209,43 @@ class HtmlSniffer:
     )  # fmt: skip
 
     def sniff(self, content: str) -> Detection | None:
-        if self._DOCTYPE_RE.search(content):
+        # Markup quoted inside code regions is discussed, not used.
+        prose = strip_code_regions(content)
+
+        if self._DOCTYPE_RE.search(prose):
             return Detection(ContentType.HTML, 0.99, self.name)
 
         distinct: set[str] = set()
         closing = 0
-        for slash, raw_tag in self._TAG_RE.findall(content):
-            tag = raw_tag.lower()
+        markup_chars = 0
+        for match in self._TAG_RE.finditer(prose):
+            tag = match.group(2).lower()
             if tag not in self._KNOWN_TAGS:
                 continue
             distinct.add(tag)
-            if slash:
+            markup_chars += len(match.group())
+            if match.group(1):
                 closing += 1
 
         if not distinct:
             return None
         if distinct & self._DOCUMENT_TAGS:
             return Detection(ContentType.HTML, 0.99, self.name)
-        if closing >= 2 or (closing >= 1 and len(distinct) >= 3):
-            return Detection(ContentType.HTML, min(0.95, 0.8 + 0.02 * len(distinct)), self.name)
+
+        if closing < 2:
+            return None
+
+        density = markup_chars / max(len(prose.strip()), 1)
+        opens_with_tag = bool(_OPENS_WITH_TAG_RE.match(_LEADING_NOISE_RE.sub("", prose)))
+
+        if opens_with_tag or density > _DENSE_MARKUP_RATIO:
+            confidence = min(0.95, 0.8 + 0.02 * len(distinct))
+            return Detection(
+                ContentType.HTML,
+                confidence,
+                self.name,
+                metadata={"markup_density": round(density, 3), "opens_with_tag": opens_with_tag},
+            )
         return None
 
 
@@ -226,8 +277,26 @@ class ContentDetector:
         *,
         confidence_threshold: float = CONFIDENCE_THRESHOLD,
     ) -> None:
-        self._sniffers = tuple(sniffers) if sniffers is not None else default_sniffers()
+        self._sniffers = list(sniffers) if sniffers is not None else list(default_sniffers())
         self._threshold = confidence_threshold
+
+    @property
+    def sniffers(self) -> tuple[Sniffer, ...]:
+        return tuple(self._sniffers)
+
+    def add_sniffer(self, sniffer: Sniffer) -> None:
+        """Register a sniffer contributed by a plugin.
+
+        Order does not matter — ``detect`` takes the highest confidence, not the
+        first match — so a new sniffer is simply appended.
+        """
+        if any(existing.name == sniffer.name for existing in self._sniffers):
+            raise ValueError(f"sniffer {sniffer.name!r} is already registered")
+        self._sniffers.append(sniffer)
+
+    def remove_sniffer(self, name: str) -> None:
+        """Remove a sniffer. Idempotent, so a rollback can call it blindly."""
+        self._sniffers = [item for item in self._sniffers if item.name != name]
 
     def detect(self, content: str, declared_mime: str | None = None) -> Detection:
         """Identify ``content``. Body evidence beats the declared type."""

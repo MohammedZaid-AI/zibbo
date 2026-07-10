@@ -157,6 +157,20 @@ Rules are evaluated in order and the first to decide wins, so the kill switch
 (`LLMGATEWAY_OPTIMIZATION_ENABLED=false`) precedes everything. Adding a rule — per
 tenant, per model, per size — is one class.
 
+## Optimization never costs more than it saves
+
+A transformer can legitimately grow its input. Markdown table syntax outweighs CSV
+commas on a narrow table; a short HTML fragment can gain more syntax than it sheds.
+
+So the pipeline counts tokens before and after, and **discards any transformation
+that increases the count**, forwarding the original. The worst a transformer can do
+to a bill is nothing.
+
+This lives in the pipeline rather than in each transformer because it is a property
+of the product, not of any one format — and because a transformer cannot be trusted
+to police itself. Reverted transformations are logged at `DEBUG` as
+`transformation_reverted`.
+
 ## Transparency
 
 If nothing changed, the **original bytes** are forwarded. Not a re-serialization of

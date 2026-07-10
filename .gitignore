@@ -26,6 +26,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Dashboard (Phase 5)
+# Dashboard (Phase 5) and the JS compatibility harness
 node_modules/
 .next/
+package-lock.json
+
+# Benchmark output
+benchmark-results.json

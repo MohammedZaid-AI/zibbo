@@ -1,0 +1,13 @@
+{
+  "name": "llmgateway-openai-js-compat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Drives the official OpenAI JavaScript SDK against LLMGateway.",
+  "scripts": {
+    "test": "node compat.test.mjs"
+  },
+  "dependencies": {
+    "openai": "^4.77.0"
+  }
+}

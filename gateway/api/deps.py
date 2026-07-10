@@ -13,6 +13,7 @@ from fastapi import Depends, Request
 from gateway.config import Settings, get_settings
 from gateway.health import HealthRegistry
 from gateway.optimizers import TransformationPipeline
+from gateway.plugins import PluginManager
 from gateway.providers import ProviderRegistry, ProxyService
 
 
@@ -40,6 +41,12 @@ def get_pipeline(request: Request) -> TransformationPipeline:
     return pipeline
 
 
+def get_plugin_manager(request: Request) -> PluginManager:
+    """Plugins discovered and attached during startup."""
+    plugins: PluginManager = request.app.state.plugins
+    return plugins
+
+
 def get_start_time(request: Request) -> float:
     """Monotonic timestamp captured when the application started."""
     started: float = request.app.state.started_at
@@ -52,3 +59,4 @@ StartTimeDep = Annotated[float, Depends(get_start_time)]
 ProviderRegistryDep = Annotated[ProviderRegistry, Depends(get_provider_registry)]
 ProxyServiceDep = Annotated[ProxyService, Depends(get_proxy_service)]
 PipelineDep = Annotated[TransformationPipeline, Depends(get_pipeline)]
+PluginManagerDep = Annotated[PluginManager, Depends(get_plugin_manager)]

@@ -12,7 +12,7 @@ Client SDKs parse this shape. Emitting anything else — FastAPI's default
 from __future__ import annotations
 
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
@@ -46,6 +46,57 @@ class ErrorType:
     SERVICE_UNAVAILABLE = "service_unavailable_error"
 
 
+class ErrorEnvelope(Protocol):
+    """Renders a gateway-authored error in a provider's native shape.
+
+    Only failures with *no upstream response* need this — a provider's own 429 is
+    relayed verbatim. But a caller who pointed an Anthropic SDK at the gateway and
+    got back an OpenAI-shaped 502 would see their error handling break on exactly
+    the requests where it matters most. So the shape follows the route.
+    """
+
+    def render(
+        self,
+        *,
+        message: str,
+        error_type: str,
+        code: str | None,
+        param: str | None,
+        request_id: str | None,
+    ) -> dict[str, Any]: ...
+
+
+class OpenAIErrorEnvelope:
+    """``{"error": {"message", "type", "param", "code", "request_id"}}``.
+
+    Also the gateway's default, used on routes that belong to no provider — health,
+    404s, request validation. OpenAI's shape is the de-facto convention and the one
+    a bare ``curl`` user is least surprised by.
+    """
+
+    def render(
+        self,
+        *,
+        message: str,
+        error_type: str,
+        code: str | None,
+        param: str | None,
+        request_id: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "error": {
+                "message": message,
+                "type": error_type,
+                "param": param,
+                "code": code,
+                "request_id": request_id,
+            }
+        }
+
+
+DEFAULT_ERROR_ENVELOPE: Final[ErrorEnvelope] = OpenAIErrorEnvelope()
+
+
 class GatewayError(Exception):
     """Base class for every failure the gateway raises deliberately.
 
@@ -66,11 +117,15 @@ class GatewayError(Exception):
         code: str | None = None,
         param: str | None = None,
         context: Mapping[str, Any] | None = None,
+        envelope: ErrorEnvelope | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.param = param
         self.context: dict[str, Any] = dict(context or {})
+        # Carried on the exception rather than looked up in the handler: by the time
+        # the handler runs, the provider that failed is no longer in scope.
+        self.envelope: ErrorEnvelope = envelope or DEFAULT_ERROR_ENVELOPE
         if status_code is not None:
             self.status_code = status_code
         if error_type is not None:
@@ -79,7 +134,7 @@ class GatewayError(Exception):
             self.code = code
 
     def to_payload(self, request_id: str | None = None) -> dict[str, Any]:
-        return error_payload(
+        return self.envelope.render(
             message=self.message,
             error_type=self.error_type,
             code=self.code,
@@ -135,16 +190,10 @@ def error_payload(
     param: str | None = None,
     request_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build the OpenAI-compatible error envelope."""
-    return {
-        "error": {
-            "message": message,
-            "type": error_type,
-            "param": param,
-            "code": code,
-            "request_id": request_id,
-        }
-    }
+    """Build the default (OpenAI-compatible) error envelope."""
+    return DEFAULT_ERROR_ENVELOPE.render(
+        message=message, error_type=error_type, code=code, param=param, request_id=request_id
+    )
 
 
 def _json_error(

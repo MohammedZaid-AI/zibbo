@@ -12,22 +12,26 @@ Two response paths, chosen by whether the caller asked for a stream:
   the caller disconnects. Nothing is buffered, so time-to-first-token is the
   provider's, plus a proxy hop.
 
-An upstream **HTTP error is not an exception here.** OpenAI's 400 body is already
-the envelope its SDK expects, so it is relayed verbatim, status and all. Only
-failures that produce no HTTP response — connect refused, timeout — become
-gateway errors, and those are shapes the provider itself can never return.
+An upstream **HTTP error is not an exception here.** The provider's own 400 body is
+already the envelope its SDK expects, so it is relayed verbatim, status and all. Only
+failures that produce no HTTP response — connect refused, timeout — become gateway
+errors, and those are rendered in *this provider's* envelope so the caller's SDK can
+still parse them.
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING
 
 import httpx
+from starlette.background import BackgroundTask
 from starlette.responses import Response, StreamingResponse
 
-from gateway.errors import UpstreamError, UpstreamTimeoutError
+from gateway.errors import ErrorType, UpstreamError, UpstreamTimeoutError
 from gateway.logging import get_logger
+from gateway.middleware.request_context import get_request_id
 from gateway.providers.headers import filter_response_headers
 
 if TYPE_CHECKING:
@@ -135,34 +139,110 @@ class ProxyService:
             upstream_status=response.status_code,
             time_to_headers_ms=_elapsed_ms(started),
         )
+        relay = _StreamRelay(response, log, started, provider)
         return _relay(
             response.status_code,
             response.headers,
-            iterator=self._drain(response, log, started),
+            iterator=relay,
+            # Belt and braces: Starlette runs this once the response is finished,
+            # however it finished. `aclose` is idempotent.
+            background=BackgroundTask(relay.aclose),
         )
 
-    @staticmethod
-    async def _drain(
-        response: httpx.Response, log: BoundLogger, started: float
-    ) -> AsyncIterator[bytes]:
-        """Yield upstream chunks, always releasing the connection.
 
-        The ``finally`` matters more than the loop. If the caller disconnects
-        mid-stream, Starlette cancels this generator; without the close, the
-        upstream connection leaks out of the pool and the pool eventually starves.
-        """
-        forwarded = 0
+class _StreamRelay:
+    """Relays upstream chunks to the caller and owns the upstream connection.
+
+    An explicit iterator rather than an async generator, and the distinction is the
+    whole point. A generator's ``finally`` only runs if the generator was *started*;
+    calling ``aclose()`` on one that never reached its first ``yield`` is a silent
+    no-op. A caller that disconnects between the response headers and the first
+    chunk would therefore leak an upstream connection — slowly, invisibly, until the
+    pool starved. Here ``aclose`` closes the response whether iteration began or not.
+
+    It also handles the upstream breaking mid-stream. Headers are already sent, so no
+    HTTP error can be returned, and stopping silently is the worst outcome: the
+    caller's SDK sees a clean end-of-stream and hands back a truncated answer as if
+    it were complete. Instead a final error frame is emitted, framed by the provider
+    (``provider.stream_error_frame``) so its SDK's stream decoder raises from it
+    rather than treating it as silent data loss.
+    """
+
+    def __init__(
+        self, response: httpx.Response, log: BoundLogger, started: float, provider: Provider
+    ) -> None:
+        self._response = response
+        self._log = log
+        self._started = started
+        self._provider = provider
+        self._chunks: AsyncIterator[bytes] | None = None
+        self._forwarded = 0
+        self._exhausted = False
+        self._closed = False
+
+    def __aiter__(self) -> _StreamRelay:
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._exhausted:
+            raise StopAsyncIteration
+        if self._chunks is None:
+            self._chunks = self._response.aiter_bytes()
+
         try:
-            async for chunk in response.aiter_bytes():
-                forwarded += len(chunk)
-                yield chunk
-        finally:
-            await response.aclose()
-            log.info(
-                "upstream_stream_closed",
-                response_bytes=forwarded,
-                upstream_duration_ms=_elapsed_ms(started),
+            chunk = await anext(self._chunks)
+        except StopAsyncIteration:
+            self._exhausted = True
+            await self.aclose()
+            raise
+        except httpx.TimeoutException as exc:
+            return await self._fail(
+                exc, "The upstream provider stopped responding mid-stream.", "upstream_timeout"
             )
+        except httpx.TransportError as exc:
+            return await self._fail(
+                exc, "The upstream provider's response ended unexpectedly.", "upstream_error"
+            )
+        except BaseException:
+            # Cancellation and GeneratorExit land here: the caller hung up, or the
+            # server is shutting down. `shield` lets the close finish even though
+            # this task is being torn down — otherwise the cancellation would
+            # interrupt `aclose` and strand the connection.
+            await asyncio.shield(self.aclose())
+            raise
+
+        self._forwarded += len(chunk)
+        return chunk
+
+    async def _fail(self, exc: Exception, message: str, code: str) -> bytes:
+        self._log.warning(
+            "upstream_stream_failed",
+            cause=type(exc).__name__,
+            code=code,
+            response_bytes=self._forwarded,
+        )
+        self._exhausted = True
+        await self.aclose()
+        payload = self._provider.error_envelope.render(
+            message=message,
+            error_type=ErrorType.UPSTREAM,
+            code=code,
+            param=None,
+            request_id=get_request_id(),
+        )
+        return self._provider.stream_error_frame(payload)
+
+    async def aclose(self) -> None:
+        """Release the upstream connection. Safe to call any number of times."""
+        if self._closed:
+            return
+        self._closed = True
+        await self._response.aclose()
+        self._log.info(
+            "upstream_stream_closed",
+            response_bytes=self._forwarded,
+            upstream_duration_ms=_elapsed_ms(self._started),
+        )
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -178,11 +258,12 @@ def _relay(
     *,
     content: bytes | None = None,
     iterator: AsyncIterator[bytes] | None = None,
+    background: BackgroundTask | None = None,
 ) -> Response:
     """Build the caller-facing response, carrying upstream's headers across."""
     response: Response
     if iterator is not None:
-        response = StreamingResponse(iterator, status_code=status_code)
+        response = StreamingResponse(iterator, status_code=status_code, background=background)
     else:
         response = Response(content=content, status_code=status_code)
 
@@ -200,6 +281,7 @@ def _timeout_error(provider: Provider, exc: httpx.TimeoutException) -> UpstreamT
     return UpstreamTimeoutError(
         f"The upstream provider {provider.name!r} did not respond in time.",
         context={"provider": provider.name, "cause": type(exc).__name__},
+        envelope=provider.error_envelope,
     )
 
 
@@ -207,4 +289,5 @@ def _transport_error(provider: Provider, exc: httpx.TransportError) -> UpstreamE
     return UpstreamError(
         f"Could not reach the upstream provider {provider.name!r}.",
         context={"provider": provider.name, "cause": type(exc).__name__},
+        envelope=provider.error_envelope,
     )

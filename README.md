@@ -33,11 +33,19 @@ deterministically optimizes eligible request payloads before forwarding them.
 | 1 | App skeleton, config, logging, errors, health, Docker | done |
 | 2 | OpenAI-compatible proxy, provider layer, streaming | done |
 | 3 | Transformation pipeline: HTML / JSON / text | done |
-| 4 | Token + cost analytics (Postgres) | next |
-| 5 | Next.js dashboard | |
-| 6 | Anthropic-compatible endpoint | |
-| 7 | PDF / DOCX / CSV optimizers | |
-| 8 | Redis cache, response caching, benchmarks | |
+| 4 | Production hardening: chaos, streaming, security, benchmarks | done |
+| 5 | Plugin architecture and transformation SDK | done |
+| 6 | Multi-provider: OpenAI, Anthropic, Groq, Mistral, Ollama | done |
+| 7 | Token + cost analytics (Postgres) | next |
+| 8 | Next.js dashboard | |
+| 9 | PDF / DOCX optimizers, Redis cache | |
+
+Reference: [ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
+[PROVIDERS.md](docs/PROVIDERS.md) ·
+[EXTENDING.md](docs/EXTENDING.md) ·
+[PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md) ·
+[COMPATIBILITY.md](docs/COMPATIBILITY.md) ·
+[OPTIMIZATION.md](docs/OPTIMIZATION.md)
 
 ## What it saves
 
@@ -115,6 +123,9 @@ guarantees: [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
 | Method | Path | Purpose |
 |---|---|---|
 | any | `/v1/*` | OpenAI-compatible proxy |
+| any | `/anthropic/*` | Anthropic-compatible proxy |
+| any | `/{groq,mistral,ollama}/v1/*` | OpenAI-compatible providers (when configured) |
+| `GET` | `/internal/plugins` | Discovered plugins, including failures and why |
 | `GET` | `/health` | Service summary: version, environment, uptime |
 | `GET` | `/health/live` | Liveness. Touches no dependency, never fails while the process runs |
 | `GET` | `/health/ready` | Readiness. Probes every dependency; `503` if any is unhealthy |
@@ -160,10 +171,21 @@ between your service and this one.
 pytest                          # full suite
 pytest -m integration           # ASGI-level tests only
 pytest -m compat                # drives the gateway with the real OpenAI SDK
-pytest -m property              # determinism and idempotency invariants
+pytest -m property              # determinism, idempotency, output validity
 ruff check . && ruff format --check .
 mypy gateway
-python -m benchmarks.run        # optimization benchmarks
+```
+
+Benchmarks and the JavaScript compatibility suite need a running upstream:
+
+```bash
+python -m benchmarks.run                 # token reduction per document type
+python -m benchmarks.large_payload       # 1/5/10 MB: latency, memory, degradation
+
+uvicorn benchmarks.upstream:app --port 8124 --no-access-log
+LLMGATEWAY_OPENAI_BASE_URL=http://127.0.0.1:8124/v1 uvicorn gateway.main:app --port 8123
+python -m benchmarks.overhead --requests 600 --concurrency 1   # added latency
+cd compat/openai-js && npm install && npm test                 # JS SDK
 ```
 
 ## Architecture
@@ -206,3 +228,14 @@ preservation.
 `pipeline.transform(request)`; the registry selects a transformer by what the content
 *is*. Adding PDF, DOCX, CSV, XML, PII masking or deduplication means adding one module
 and one registration line. See [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
+
+**Plugins.** A transformer can also live in its own package. `pip install
+llmgateway-transformer-csv` and the gateway discovers it through a Python entry point;
+no gateway code changes. A broken plugin is recorded and skipped, never fatal.
+
+```bash
+pip install -e examples/llmgateway-transformer-csv
+curl localhost:8000/internal/plugins
+```
+
+See [docs/PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md).

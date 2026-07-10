@@ -286,6 +286,42 @@ def plain_text_notes() -> Dataset:
     )
 
 
+def large_html(target_bytes: int) -> str:
+    """A page of ``target_bytes`` with **unique** content throughout.
+
+    Repeating one document would be a degenerate benchmark: every paragraph would
+    be a consecutive duplicate of the last, the text transformer would collapse
+    them all, and the measurement would report the dedupe rather than the HTML
+    cleaning. Every section here is drawn fresh from the seeded generator.
+    """
+    rng = _rng()
+    pieces: list[str] = [
+        "<!DOCTYPE html><html>",
+        _boilerplate_head(),
+        "<body>",
+        _navigation(rng, links=60),
+        _cookie_banner(),
+        "<main><article><h1>Large Reference Document</h1>",
+    ]
+    size = sum(len(piece) for piece in pieces)
+
+    index = 0
+    while size < target_bytes:
+        section = (
+            f"<h2>Section {index}: {_sentence(rng, 4).rstrip('.')}</h2>"
+            + "".join(f"<p>{_paragraph(rng)}</p>" for _ in range(3))
+            + f"<ul>{''.join(f'<li>{_sentence(rng, 7)}</li>' for _ in range(3))}</ul>"
+            + _advertisements(1)
+            + f'<div style="display:none">{_sentence(rng, 6)}</div>'
+        )
+        pieces.append(section)
+        size += len(section)
+        index += 1
+
+    pieces.extend(["</article></main>", _hidden_tracking(), _footer(), "</body></html>"])
+    return "".join(pieces)
+
+
 def all_datasets() -> tuple[Dataset, ...]:
     return (
         wikipedia_article(),

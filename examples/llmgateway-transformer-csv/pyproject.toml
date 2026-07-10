@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llmgateway-transformer-csv"
+version = "1.0.0"
+description = "CSV to compact Markdown tables, for LLMGateway."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "LLMGateway", email = "plugins@llmgateway.dev" }]
+
+# The gateway is a peer, not a vendored copy. A plugin never pins it tightly:
+# the plugin API version in the metadata is what governs compatibility.
+dependencies = []
+
+# This one line is the whole discovery mechanism. `pip install` it and the gateway
+# finds it. The value is `module:ATTRIBUTE`, and the attribute is a TransformerPlugin.
+[project.entry-points."llmgateway.transformers"]
+csv = "llmgateway_transformer_csv:PLUGIN"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llmgateway_transformer_csv"]

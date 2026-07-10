@@ -1,13 +1,77 @@
-# OpenAI API compatibility
+# API compatibility
 
 LLMGateway aims to be indistinguishable from the upstream provider to any client
 that changes only its `base_url`. This document records every place where it is
-*not*, and why.
+*not*, and why. It is written around OpenAI because that is the reference SDK, but
+every difference here applies to **all** providers unless noted; provider-specific
+routing and auth are in [PROVIDERS.md](PROVIDERS.md).
 
-As of Phase 3 the gateway **optimizes request bodies** on a small allowlist of
-endpoints. Response bodies are still never modified. See
-[OPTIMIZATION.md](OPTIMIZATION.md) for the full design, and difference 11 below for
-what that means for compatibility.
+The gateway **optimizes request bodies** on a small allowlist of endpoints per
+provider. Response bodies are never modified. See [OPTIMIZATION.md](OPTIMIZATION.md)
+for the design, and difference 11 below for what that means for compatibility.
+
+## Compatibility matrix
+
+### Clients
+
+| Client | Version | Verified by | Result |
+|---|---|---|---|
+| OpenAI Python SDK | `openai>=1.60` | `tests/test_openai_sdk_compat.py` | 11/11 pass |
+| OpenAI JavaScript SDK | `openai@^4.77` | `compat/openai-js/compat.test.mjs` | 9/9 pass |
+| Raw HTTP (`httpx`, `curl`, `fetch`) | — | `tests/test_proxy_openai.py` | pass |
+
+Each client is constructed with **exactly one** non-default argument: `base_url`.
+
+### Endpoints
+
+| Endpoint | Proxied | Optimized | Notes |
+|---|---|---|---|
+| `POST /v1/chat/completions` | yes | yes | streaming and non-streaming |
+| `POST /v1/responses` | yes | yes | `input` and `instructions` |
+| `POST /v1/assistants` | yes | yes | `instructions` |
+| `POST /v1/threads/*` | yes | yes | message content |
+| `POST /v1/embeddings` | yes | **no** | input is not prose to clean |
+| `GET /v1/models` | yes | n/a | GET carries no body |
+| `POST /v1/files` | yes | **no** | multipart; byte-exact passthrough |
+| `POST /v1/uploads` | yes | **no** | byte-exact passthrough |
+| `POST /v1/audio/*` | yes | **no** | binary |
+| `POST /v1/images/*` | yes | **no** | binary |
+| `POST /v1/fine_tuning/*` | yes | **no** | corrupting these would be silent |
+| `POST /v1/batches` | yes | **no** | |
+| `POST /v1/moderations` | yes | **no** | |
+| anything else under `/v1` | yes | **no** | catch-all route; not yet allowlisted |
+
+"Proxied" means byte-exact relay of request and response, including headers and
+status. "Optimized" applies only to text inside message content, and only when the
+body is JSON on a `POST`.
+
+### Features
+
+| Feature | Status |
+|---|---|
+| Non-streaming responses | supported, byte-identical |
+| Streaming (`stream: true`) | supported, chunk boundaries preserved |
+| Streaming abort / client disconnect | upstream connection released immediately |
+| Mid-stream upstream failure | final SSE `error` frame (see difference 13) |
+| Tool / function calling | supported; arguments never modified |
+| Multimodal content parts | text parts optimized; image and audio parts untouched |
+| `Authorization` passthrough | caller's key always wins |
+| Rate-limit headers | relayed unmodified |
+| Retries | left to the SDK; the gateway does not retry |
+| Prompt caching | preserved (transformation is deterministic) |
+| HTTP/2 upstream | not used |
+| Response body optimization | not performed, ever |
+
+### Intentionally unsupported
+
+* **Retries and circuit breaking.** A transient upstream failure surfaces as a 502
+  or 504 and the caller's SDK retries. The gateway does not hide provider failures.
+* **Request body streaming.** Bodies are buffered; the pipeline must see the whole
+  body. Large file uploads therefore hold memory proportional to their size.
+* **`Expect: 100-continue`.** Stripped.
+* **Redirects.** A 3xx is handed to the caller rather than followed.
+* **Percent-encoded path separators.** `%2F` in a path is normalized to `/`.
+* **Response caching.** Every request reaches the provider (Phase 8).
 
 ## Verified compatible
 
@@ -147,6 +211,29 @@ Two response headers are added: `x-llmgateway-optimization` (`applied` or
 
 Unchanged from Phase 2, but worth repeating alongside the optimizer: the gateway
 decodes and re-encodes the path. No current OpenAI endpoint uses encoded separators.
+
+### 13. A stream that breaks after it starts ends with an SSE error frame
+
+Once response headers are sent, HTTP offers no way to report a failure. If the
+upstream connection dies mid-stream, OpenAI's own behaviour is to simply stop, and a
+client that is not watching for a missing `[DONE]` will treat a truncated answer as a
+complete one.
+
+The gateway instead emits one final frame:
+
+```
+data: {"error": {"message": "The upstream provider's response ended unexpectedly.",
+                 "type": "upstream_error", "code": "upstream_error",
+                 "request_id": "req_..."}}
+```
+
+Both the Python and JavaScript SDKs raise an `APIError` on a stream frame carrying
+`error`, so a broken stream becomes an exception rather than silent data loss. `[DONE]`
+is never emitted in this case.
+
+This is a deviation, and it is the one place the gateway deliberately adds bytes to a
+response body. The alternative — silence — trades a visible error for a corrupted
+answer.
 
 ## Not yet implemented
 

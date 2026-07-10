@@ -36,6 +36,10 @@ class TransformerRegistry:
             "transformer_registered", transformer=transformer.name, priority=transformer.priority
         )
 
+    def unregister(self, name: str) -> None:
+        """Remove a transformer. Idempotent, so a rollback can call it blindly."""
+        self._transformers = [item for item in self._transformers if item.name != name]
+
     def select(self, content: str, detection: Detection) -> Transformer | None:
         """The highest-priority transformer that accepts this content, if any."""
         for transformer in self._transformers:

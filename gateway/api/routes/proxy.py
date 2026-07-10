@@ -1,12 +1,14 @@
 """The proxy route.
 
-One catch-all handler per provider, not one handler per endpoint. The gateway
-does not model ``chat/completions`` or ``embeddings`` because it does not modify
-them — it only needs to know where they live. Anything OpenAI adds tomorrow is
-proxied today.
+One catch-all handler per provider, not one handler per endpoint. The gateway does
+not model ``chat/completions`` or ``messages`` because it does not modify them — it
+only needs to know where they live. Anything a provider adds tomorrow is proxied
+today.
 
-Optimization enters here as a single call. The route knows a pipeline exists; it
-does not know HTML exists, nor that the pipeline chose an HTML transformer.
+The handler holds **no provider logic**. It resolves its provider by name, reads that
+provider's optimization policy and adapters, and hands both to the shared pipeline.
+Everything provider-specific — auth, endpoints, schema, error shape — lives on the
+provider object.
 
 Excluded from the OpenAPI schema on purpose: a ``{path:path}`` wildcard documents
 nothing useful, and publishing it would imply the gateway validates payloads it
@@ -16,6 +18,7 @@ deliberately passes through untouched.
 from __future__ import annotations
 
 import httpx
+import structlog
 from fastapi import APIRouter, Request, Response
 
 from gateway.api.deps import PipelineDep, ProviderRegistryDep, ProxyServiceDep
@@ -23,7 +26,7 @@ from gateway.middleware.request_context import (
     OPTIMIZATION_HEADER,
     TOKENS_SAVED_HEADER,
 )
-from gateway.optimizers import TransformationRequest
+from gateway.optimizers import TransformationReport, TransformationRequest
 
 PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
@@ -31,8 +34,8 @@ PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 def create_proxy_router(*, provider_name: str, prefix: str) -> APIRouter:
     """Mount ``provider_name`` at ``prefix``.
 
-    Phase 6 calls this again for Anthropic. The only per-provider inputs are a
-    name and a path prefix, which is the whole point of the Provider abstraction.
+    Called once per configured provider. The only per-provider inputs are a name and
+    a path prefix, which is the whole point of the Provider abstraction.
     """
     router = APIRouter(prefix=prefix, tags=[provider_name])
 
@@ -50,6 +53,14 @@ def create_proxy_router(*, provider_name: str, prefix: str) -> APIRouter:
         pipeline: PipelineDep,
     ) -> Response:
         provider = registry.get(provider_name)
+        policy = request.app.state.provider_policies[provider_name]
+
+        # Bound here rather than passed down: every log line emitted while handling
+        # this request — the access log included — picks these up from contextvars.
+        structlog.contextvars.bind_contextvars(
+            provider=provider.name,
+            endpoint=f"/{upstream_path.lstrip('/')}",
+        )
 
         # Fully buffered. Streaming *request* bodies would let a huge file upload
         # pass through without touching memory, but the pipeline must see the whole
@@ -62,8 +73,11 @@ def create_proxy_router(*, provider_name: str, prefix: str) -> APIRouter:
                 path=upstream_path,
                 content_type=request.headers.get("content-type", ""),
                 body=body,
-            )
+            ),
+            policy=policy,
+            adapters=provider.adapters,
         )
+        _bind_optimization_context(report)
 
         # `.raw` rather than the mapping view: a client may send a header twice,
         # and collapsing the pair would change the request the provider sees.
@@ -86,3 +100,17 @@ def create_proxy_router(*, provider_name: str, prefix: str) -> APIRouter:
         return response
 
     return router
+
+
+def _bind_optimization_context(report: TransformationReport) -> None:
+    """Metadata only. Never a byte of what the user sent."""
+    structlog.contextvars.bind_contextvars(
+        optimization_applied=report.applied,
+        tokens_before=report.original_token_count,
+        tokens_after=report.transformed_token_count,
+        tokens_saved=report.tokens_saved,
+        bytes_before=report.original_size_bytes,
+        bytes_after=report.transformed_size_bytes,
+        transformers=report.transformers_used,
+        skip_reason=report.skip_reason.value if report.skip_reason else None,
+    )

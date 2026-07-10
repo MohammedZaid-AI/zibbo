@@ -19,6 +19,7 @@ from gateway.optimizers.policy import (
     PolicyEngine,
 )
 from gateway.optimizers.registry import TransformerRegistry
+from gateway.providers.openai import OPENAI_ENDPOINTS
 from tests.conftest import build_settings
 
 
@@ -33,7 +34,7 @@ def _request(
 
 @pytest.fixture
 def engine() -> PolicyEngine:
-    return PolicyEngine.from_settings(build_settings())
+    return PolicyEngine.from_settings(build_settings(), OPENAI_ENDPOINTS)
 
 
 # -- Allowed ---------------------------------------------------------------
@@ -105,12 +106,16 @@ def test_empty_bodies_are_skipped(engine: PolicyEngine) -> None:
 
 
 def test_oversized_bodies_are_skipped() -> None:
-    engine = PolicyEngine.from_settings(build_settings(optimization_max_body_bytes=10))
+    engine = PolicyEngine.from_settings(
+        build_settings(optimization_max_body_bytes=10), OPENAI_ENDPOINTS
+    )
     assert engine.decide(_request(body=b"x" * 11)).reason is SkipReason.BODY_TOO_LARGE
 
 
 def test_the_kill_switch_wins_over_everything() -> None:
-    engine = PolicyEngine.from_settings(build_settings(optimization_enabled=False))
+    engine = PolicyEngine.from_settings(
+        build_settings(optimization_enabled=False), OPENAI_ENDPOINTS
+    )
     decision = engine.decide(_request())
     assert decision.optimize is False
     assert decision.reason is SkipReason.DISABLED
@@ -128,14 +133,16 @@ def test_rules_abstain_by_returning_none() -> None:
 
 def test_the_endpoint_rule_never_abstains() -> None:
     """Every other rule may abstain; this one must always decide."""
-    rule = EndpointRule()
+    rule = EndpointRule(OPENAI_ENDPOINTS)
     assert rule.evaluate(_request(path="chat/completions")) is not None
     assert rule.evaluate(_request(path="anything/else")) is not None
 
 
 def test_the_first_rule_to_decide_wins() -> None:
     """Order is the contract: the kill switch is checked before the endpoint."""
-    engine = PolicyEngine.from_settings(build_settings(optimization_enabled=False))
+    engine = PolicyEngine.from_settings(
+        build_settings(optimization_enabled=False), OPENAI_ENDPOINTS
+    )
     assert engine.decide(_request(path="files")).reason is SkipReason.DISABLED
 
 
@@ -150,7 +157,7 @@ def test_engine_is_extensible_with_a_custom_rule() -> None:
                 return PolicyDecision(False, self.name, SkipReason.DISABLED)
             return None
 
-    engine = PolicyEngine([BlockOneModel(), EndpointRule()])
+    engine = PolicyEngine([BlockOneModel(), EndpointRule(OPENAI_ENDPOINTS)])
     assert engine.decide(_request(body=b'{"m":"do-not-touch"}')).optimize is False
     assert engine.decide(_request(body=b'{"m":"fine"}')).optimize is True
 

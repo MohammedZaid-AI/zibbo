@@ -25,6 +25,9 @@ def build_settings(**overrides: object) -> Settings:
         "log_format": LogFormat.CONSOLE,
         "cors_allow_origins": [],
         "health_check_timeout_seconds": 1.0,
+        # Off by default so the suite does not depend on which plugins happen to be
+        # installed in the developer's environment. Plugin tests opt in explicitly.
+        "plugins_enabled": False,
     }
     defaults.update(overrides)
     return Settings(_env_file=None, **defaults)  # type: ignore[arg-type]

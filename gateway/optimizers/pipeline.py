@@ -33,6 +33,7 @@ from gateway.optimizers.models import (
     SkipReason,
     TransformationReport,
     TransformationResult,
+    TransformOutput,
 )
 
 if TYPE_CHECKING:
@@ -48,30 +49,40 @@ logger = get_logger(__name__)
 
 
 class TransformationPipeline:
-    """Detects, transforms, measures, reports."""
+    """Detects, transforms, measures, reports.
+
+    The pipeline is **provider-agnostic**. Detection, transformation, token counting
+    and measurement are the same whatever the request is bound for. What differs by
+    provider — which endpoints are eligible (``policy``) and where the prose lives in
+    the body (``adapters``) — is passed to :meth:`transform` per call, supplied by the
+    provider that owns the route. So one pipeline (one plugin registry, one detector)
+    serves every provider, and no provider knowledge leaks into this module.
+    """
 
     def __init__(
         self,
         *,
         detector: ContentDetector,
         registry: TransformerRegistry,
-        policy: PolicyEngine,
-        adapters: AdapterRegistry,
         token_counters: TokenCounterFactory,
         options: OptimizerOptions,
         offload_threshold_bytes: int = 131_072,
     ) -> None:
         self._detector = detector
         self._registry = registry
-        self._policy = policy
-        self._adapters = adapters
         self._token_counters = token_counters
         self._options = options
         self._offload_threshold_bytes = offload_threshold_bytes
 
-    async def transform(self, request: TransformationRequest) -> TransformationReport:
-        """Optimize ``request`` if policy allows. Never raises on bad input."""
-        decision = self._policy.decide(request)
+    async def transform(
+        self,
+        request: TransformationRequest,
+        *,
+        policy: PolicyEngine,
+        adapters: AdapterRegistry,
+    ) -> TransformationReport:
+        """Optimize ``request`` if the provider's policy allows. Never raises."""
+        decision = policy.decide(request)
         if not decision.optimize:
             assert decision.reason is not None  # noqa: S101 — a deny always carries a reason
             report = TransformationReport.skipped(request.body, decision.reason)
@@ -79,16 +90,18 @@ class TransformationPipeline:
             return report
 
         if len(request.body) >= self._offload_threshold_bytes:
-            report = await anyio.to_thread.run_sync(self._run, request)
+            report = await anyio.to_thread.run_sync(self._run, request, adapters)
         else:
-            report = self._run(request)
+            report = self._run(request, adapters)
 
         self._log(report)
         return report
 
     # -- Synchronous core, safe to run in a worker thread ------------------
 
-    def _run(self, request: TransformationRequest) -> TransformationReport:
+    def _run(
+        self, request: TransformationRequest, adapters: AdapterRegistry
+    ) -> TransformationReport:
         started = time.perf_counter()
 
         try:
@@ -98,7 +111,7 @@ class TransformationPipeline:
         if not isinstance(payload, dict):
             return TransformationReport.skipped(request.body, SkipReason.MALFORMED_PAYLOAD)
 
-        adapter = self._adapters.for_path(request.path)
+        adapter = adapters.for_path(request.path)
         if adapter is None:
             return TransformationReport.skipped(request.body, SkipReason.NO_ADAPTER)
 
@@ -152,11 +165,28 @@ class TransformationPipeline:
             )
             return None
 
-        if output.steps:
-            segment.replace(output.content)
-
         original_tokens = counter.count(segment.text)
         transformed_tokens = counter.count(output.content) if output.steps else original_tokens
+
+        # Optimization must never cost more than it saves. A transformer can grow its
+        # input — Markdown table pipes outweigh CSV commas on a narrow table, and a
+        # short HTML fragment can gain more syntax than it sheds. When that happens
+        # the result is discarded and the original forwarded, so the worst a
+        # transformer can do to a bill is nothing. This belongs here rather than in
+        # each transformer: it is a property of the product, not of any one format.
+        if output.steps and transformed_tokens > original_tokens:
+            logger.debug(
+                "transformation_reverted",
+                transformer=transformer.name,
+                content_type=detection.content_type.value,
+                tokens_before=original_tokens,
+                tokens_after=transformed_tokens,
+            )
+            output = TransformOutput(segment.text, ())
+            transformed_tokens = original_tokens
+
+        if output.steps:
+            segment.replace(output.content)
 
         return TransformationResult(
             transformation_name=transformer.name,

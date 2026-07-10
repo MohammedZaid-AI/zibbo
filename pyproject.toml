@@ -36,6 +36,8 @@ dev = [
     # Asserting on bytes proves the wire format; asserting that *their* client parses
     # our response proves compatibility.
     "openai>=1.60.0",
+    # The real Anthropic SDK, driven against the gateway in test_anthropic_sdk_compat.py.
+    "anthropic>=0.40.0",
     # Property-based tests: determinism and idempotency of every transformer.
     "hypothesis>=6.100.0",
 ]
@@ -88,9 +90,12 @@ ignore = ["ANN401"]  # allow `Any` in narrow, well-documented spots
 # FastAPI resolves route and dependency annotations at runtime via get_type_hints,
 # so the imports backing `Annotated[..., Depends(...)]` cannot move under TYPE_CHECKING.
 "gateway/api/*" = ["TC"]
-"tests/*" = ["ANN", "TC", "S101"]  # asserts are the point of a test
+# Asserts are the point of a test; the "hardcoded secrets" are fakes we grep logs for.
+"tests/*" = ["ANN", "TC", "S101", "S105", "S106"]
 # Benchmark corpora are generated from a fixed seed; `random` is the point, not a flaw.
 "benchmarks/*" = ["S311"]
+# Example plugins are standalone packages, linted on their own terms.
+"examples/*" = ["ANN", "TC", "S101", "INP001"]
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]

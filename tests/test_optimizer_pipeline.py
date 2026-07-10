@@ -8,14 +8,17 @@ from typing import Any
 import pytest
 
 from gateway.config import Settings
-from gateway.optimizers import build_pipeline
-from gateway.optimizers.extraction import (
-    AdapterRegistry,
-    AssistantsAdapter,
-    ChatCompletionsAdapter,
-    ResponsesAdapter,
-)
+from gateway.optimizers import build_pipeline, build_provider_policy
+from gateway.optimizers.extraction import AdapterRegistry
 from gateway.optimizers.models import SkipReason, TransformationRequest
+from gateway.providers.openai import OPENAI_ENDPOINTS
+from gateway.providers.schemas import (
+    AnthropicMessagesAdapter,
+    ChatCompletionsAdapter,
+    OpenAIAssistantsAdapter,
+    ResponsesAdapter,
+    openai_adapters,
+)
 from gateway.tokenizers import HeuristicTokenCounter, TokenCounterFactory
 from tests.conftest import build_settings
 
@@ -25,9 +28,25 @@ HTML_SNIPPET = (
 )
 
 
-def _pipeline(**overrides: object) -> Any:
-    settings: Settings = build_settings(**overrides)
-    return build_pipeline(settings, TokenCounterFactory.from_settings(settings))
+class _BoundPipeline:
+    """A pipeline bound to a provider's policy and adapters, so tests keep calling
+    ``.transform(request)`` after the pipeline became provider-agnostic."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._pipeline = build_pipeline(settings, TokenCounterFactory.from_settings(settings))
+        self._policy = build_provider_policy(settings, OPENAI_ENDPOINTS)
+        self._adapters = AdapterRegistry(openai_adapters())
+
+    @property
+    def registry(self) -> Any:
+        return self._pipeline._registry
+
+    async def transform(self, request: TransformationRequest) -> Any:
+        return await self._pipeline.transform(request, policy=self._policy, adapters=self._adapters)
+
+
+def _pipeline(**overrides: object) -> _BoundPipeline:
+    return _BoundPipeline(build_settings(**overrides))
 
 
 def _chat_body(content: Any, **extra: Any) -> bytes:
@@ -208,6 +227,46 @@ async def test_tool_calls_and_other_fields_are_untouched() -> None:
     assert payload["stream"] is True
 
 
+async def test_a_transformation_that_grows_the_content_is_reverted() -> None:
+    """Optimization must never cost more than it saves.
+
+    A transformer can legitimately grow its input — Markdown table syntax outweighs
+    CSV commas on a narrow table. The pipeline discards such a result rather than
+    forwarding a bigger prompt than it received.
+    """
+    pipeline = _pipeline()
+
+    class Inflater:
+        name = "inflater"
+        priority = 0
+
+        def can_handle(self, content: str, detection: object) -> bool:
+            return True
+
+        def transform(self, content: str, detection: object) -> Any:
+            from gateway.optimizers.models import TransformOutput
+
+            return TransformOutput(content + " padding words added here", ("inflated",))
+
+    pipeline.registry._transformers.insert(0, Inflater())  # type: ignore[attr-defined, arg-type]
+
+    body = _chat_body("hello")
+    report = await pipeline.transform(_request(body))
+
+    assert not report.applied
+    assert report.skip_reason is SkipReason.NOT_MODIFIED
+    assert report.body is body, "the original bytes must be forwarded"
+
+
+async def test_a_transformation_that_keeps_the_token_count_still_applies() -> None:
+    """Only a strict increase is a regression; equal tokens with fewer bytes is a win."""
+    report = await _pipeline().transform(_request(_chat_body("trailing   \n\n\n\nspace")))
+
+    assert report.applied
+    assert report.tokens_saved >= 0
+    assert report.bytes_saved > 0
+
+
 async def test_a_broken_transformer_does_not_break_the_request() -> None:
     pipeline = _pipeline()
 
@@ -221,7 +280,7 @@ async def test_a_broken_transformer_does_not_break_the_request() -> None:
         def transform(self, content: str, detection: object) -> object:
             raise RuntimeError("kaboom")
 
-    pipeline._registry._transformers.insert(0, Exploding())  # type: ignore[attr-defined, arg-type]
+    pipeline.registry._transformers.insert(0, Exploding())  # type: ignore[attr-defined, arg-type]
 
     body = _chat_body(HTML_SNIPPET)
     report = await pipeline.transform(_request(body))
@@ -267,23 +326,41 @@ def test_responses_adapter_handles_string_and_list_input() -> None:
 
 def test_assistants_adapter_finds_instructions() -> None:
     payload = {"instructions": "a", "additional_instructions": "b"}
-    assert [s.text for s in AssistantsAdapter().extract(payload)] == ["a", "b"]
+    assert [s.text for s in OpenAIAssistantsAdapter().extract(payload)] == ["a", "b"]
 
 
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
-        ("chat/completions", "chat.completions"),
-        ("/chat/completions", "chat.completions"),
-        ("responses", "responses"),
-        ("assistants", "assistants"),
-        ("threads/x/messages", "assistants"),
+        ("chat/completions", "openai.chat.completions"),
+        ("/chat/completions", "openai.chat.completions"),
+        ("responses", "openai.responses"),
+        ("assistants", "openai.assistants"),
+        ("threads/x/messages", "openai.assistants"),
         ("embeddings", None),
     ],
 )
-def test_adapter_routing(path: str, expected: str | None) -> None:
-    adapter = AdapterRegistry().for_path(path)
+def test_openai_adapter_routing(path: str, expected: str | None) -> None:
+    adapter = AdapterRegistry(openai_adapters()).for_path(path)
     assert (adapter.name if adapter else None) == expected
+
+
+def test_anthropic_adapter_extracts_system_and_messages() -> None:
+    """The distinguishing shape: a top-level `system` string, plus content blocks."""
+    payload = {
+        "system": "You are a careful assistant.",
+        "messages": [
+            {"role": "user", "content": "plain string"},
+            {"role": "user", "content": [{"type": "text", "text": "block text"}]},
+        ],
+    }
+    texts = [s.text for s in AnthropicMessagesAdapter().extract(payload)]
+    assert texts == ["You are a careful assistant.", "plain string", "block text"]
+
+
+def test_anthropic_adapter_handles_system_as_a_block_list() -> None:
+    payload = {"system": [{"type": "text", "text": "cached system"}], "messages": []}
+    assert [s.text for s in AnthropicMessagesAdapter().extract(payload)] == ["cached system"]
 
 
 # -- Token counting --------------------------------------------------------

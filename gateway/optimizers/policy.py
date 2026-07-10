@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, Final
+from typing import TYPE_CHECKING, ClassVar
 
 from gateway.optimizers.models import SkipReason
 
@@ -100,40 +100,51 @@ class ContentTypeRule(PolicyRule):
         return None
 
 
-class EndpointRule(PolicyRule):
-    """An allowlist. Never abstains.
+@dataclass(frozen=True, slots=True)
+class EndpointPolicy:
+    """Which of a provider's endpoints carry optimizable prose.
 
-    Denied endpoints are listed explicitly as well, even though the allowlist
-    already excludes them, so the intent survives someone widening the allowlist.
+    **Data, supplied by the provider.** The gateway core cannot know that OpenAI
+    calls it ``chat/completions`` and Anthropic calls it ``messages``, and it must
+    not learn: that knowledge belongs in the provider module and nowhere else.
+
+    Denied entries are listed explicitly even though the allowlist already excludes
+    them, so the intent survives someone widening the allowlist later.
     """
+
+    allowed: frozenset[str] = frozenset()
+    allowed_prefixes: tuple[str, ...] = ()
+    allowed_suffixes: tuple[str, ...] = ()
+    """For providers that encode the operation in the path, like Gemini's
+    ``models/gemini-2.0-flash:generateContent``."""
+
+    denied_prefixes: tuple[str, ...] = ()
+
+    def permits(self, path: str) -> bool:
+        normalized = path.strip("/").lower()
+
+        for prefix in self.denied_prefixes:
+            if normalized == prefix.rstrip("/") or normalized.startswith(prefix):
+                return False
+
+        if normalized in self.allowed:
+            return True
+        if self.allowed_prefixes and normalized.startswith(self.allowed_prefixes):
+            return True
+        return bool(self.allowed_suffixes and normalized.endswith(self.allowed_suffixes))
+
+
+class EndpointRule(PolicyRule):
+    """An allowlist. Never abstains."""
 
     name: ClassVar[str] = "endpoint"
 
-    ALLOWED: Final[frozenset[str]] = frozenset({"chat/completions", "responses", "assistants"})
-    ALLOWED_PREFIXES: Final[tuple[str, ...]] = ("threads/",)
-
-    # Corrupting any of these would be catastrophic and silent.
-    DENIED_PREFIXES: Final[tuple[str, ...]] = (
-        "files",
-        "uploads",
-        "audio/",
-        "images/",
-        "fine_tuning/",
-        "batches",
-        "embeddings",
-        "moderations",
-    )
+    def __init__(self, policy: EndpointPolicy) -> None:
+        self._policy = policy
 
     def evaluate(self, request: TransformationRequest) -> PolicyDecision | None:
-        path = request.path.strip("/").lower()
-
-        for prefix in self.DENIED_PREFIXES:
-            if path == prefix.rstrip("/") or path.startswith(prefix):
-                return PolicyDecision(False, self.name, SkipReason.ENDPOINT_NOT_ELIGIBLE)
-
-        if path in self.ALLOWED or path.startswith(self.ALLOWED_PREFIXES):
+        if self._policy.permits(request.path):
             return _ALLOW
-
         return PolicyDecision(False, self.name, SkipReason.ENDPOINT_NOT_ELIGIBLE)
 
 
@@ -144,14 +155,14 @@ class PolicyEngine:
         self._rules = tuple(rules)
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> PolicyEngine:
+    def from_settings(cls, settings: Settings, endpoint_policy: EndpointPolicy) -> PolicyEngine:
         return cls(
             [
                 OptimizationEnabledRule(enabled=settings.optimization_enabled),
                 MethodRule(),
                 BodySizeRule(max_bytes=settings.optimization_max_body_bytes),
                 ContentTypeRule(),
-                EndpointRule(),
+                EndpointRule(endpoint_policy),
             ]
         )
 

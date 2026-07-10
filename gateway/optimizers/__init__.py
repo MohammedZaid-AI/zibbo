@@ -28,7 +28,7 @@ from gateway.optimizers.models import (
 )
 from gateway.optimizers.options import OptimizerOptions
 from gateway.optimizers.pipeline import TransformationPipeline
-from gateway.optimizers.policy import PolicyEngine
+from gateway.optimizers.policy import EndpointPolicy, PolicyEngine
 from gateway.optimizers.registry import TransformerRegistry
 from gateway.optimizers.transformers import HtmlTransformer, JsonTransformer, TextTransformer
 
@@ -41,6 +41,7 @@ __all__ = [
     "ContentDetector",
     "ContentType",
     "Detection",
+    "EndpointPolicy",
     "HtmlTransformer",
     "JsonTransformer",
     "OptimizerOptions",
@@ -54,6 +55,7 @@ __all__ = [
     "TransformationResult",
     "TransformerRegistry",
     "build_pipeline",
+    "build_provider_policy",
     "build_transformer_registry",
 ]
 
@@ -68,16 +70,32 @@ def build_transformer_registry(options: OptimizerOptions) -> TransformerRegistry
 
 
 def build_pipeline(
-    settings: Settings, token_counters: TokenCounterFactory
+    settings: Settings,
+    token_counters: TokenCounterFactory,
+    *,
+    registry: TransformerRegistry | None = None,
+    detector: ContentDetector | None = None,
 ) -> TransformationPipeline:
-    """Assemble the pipeline from configuration."""
+    """Assemble the provider-agnostic pipeline from configuration.
+
+    ``registry`` and ``detector`` are injectable so that the plugin manager can
+    attach to them *before* the pipeline is built. This module knows nothing about
+    plugins, and must not: the dependency runs the other way.
+
+    Per-provider policy and adapters are *not* built here — they are passed to
+    :meth:`TransformationPipeline.transform` per request by the provider that owns
+    the route. See :func:`build_provider_policy`.
+    """
     options = OptimizerOptions.from_settings(settings)
     return TransformationPipeline(
-        detector=ContentDetector(),
-        registry=build_transformer_registry(options),
-        policy=PolicyEngine.from_settings(settings),
-        adapters=AdapterRegistry(),
+        detector=detector if detector is not None else ContentDetector(),
+        registry=registry if registry is not None else build_transformer_registry(options),
         token_counters=token_counters,
         options=options,
         offload_threshold_bytes=settings.optimization_offload_threshold_bytes,
     )
+
+
+def build_provider_policy(settings: Settings, endpoint_policy: EndpointPolicy) -> PolicyEngine:
+    """The optimization policy for one provider: global rules plus its endpoints."""
+    return PolicyEngine.from_settings(settings, endpoint_policy)

@@ -39,5 +39,9 @@ class ProviderRegistry:
     def names(self) -> tuple[str, ...]:
         return tuple(self._providers)
 
+    @property
+    def providers(self) -> tuple[Provider, ...]:
+        return tuple(self._providers.values())
+
     def __contains__(self, name: object) -> bool:
         return name in self._providers

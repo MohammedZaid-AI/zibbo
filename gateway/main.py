@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import anyio.to_thread
@@ -16,6 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from gateway.api.router import api_router
+from gateway.api.routes.proxy import create_proxy_router
 from gateway.config import Settings, get_settings
 from gateway.errors import register_exception_handlers
 from gateway.health import HealthRegistry
@@ -28,12 +30,27 @@ from gateway.middleware.request_context import (
     TOKENS_SAVED_HEADER,
     RequestContextMiddleware,
 )
-from gateway.optimizers import build_pipeline
-from gateway.providers import OpenAIProvider, ProviderRegistry, ProxyService
+from gateway.optimizers import (
+    ContentDetector,
+    OptimizerOptions,
+    build_pipeline,
+    build_provider_policy,
+    build_transformer_registry,
+)
+from gateway.plugins import PluginManager
+from gateway.providers import (
+    AnthropicProvider,
+    OpenAICompatibleProvider,
+    OpenAIProvider,
+    ProviderRegistry,
+    ProxyService,
+)
 from gateway.tokenizers import TokenCounterFactory
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from gateway.providers import Provider
 
 logger = get_logger(__name__)
 
@@ -70,12 +87,59 @@ def build_upstream_client(settings: Settings) -> httpx.AsyncClient:
     )
 
 
-def build_provider_registry(settings: Settings) -> ProviderRegistry:
-    """Register every configured provider. Phase 6 adds Anthropic here."""
+@dataclass(frozen=True, slots=True)
+class MountedProvider:
+    provider: Provider
+    prefix: str
+
+
+def build_providers(settings: Settings) -> list[MountedProvider]:
+    """Every enabled provider and the route prefix it mounts at.
+
+    This is the *only* place provider classes are named. A provider absent from this
+    list simply is not served; a provider added to it needs no other change. The
+    OpenAI-compatible providers share one class, distinguished by name and base URL.
+    """
+    mounted: list[MountedProvider] = []
+
+    if settings.openai_enabled:
+        mounted.append(
+            MountedProvider(
+                OpenAIProvider(base_url=settings.openai_base_url, api_key=settings.openai_api_key),
+                settings.openai_prefix,
+            )
+        )
+    if settings.anthropic_enabled:
+        mounted.append(
+            MountedProvider(
+                AnthropicProvider(
+                    base_url=settings.anthropic_base_url,
+                    api_key=settings.anthropic_api_key,
+                    version=settings.anthropic_version,
+                ),
+                settings.anthropic_prefix,
+            )
+        )
+    for name, base_url, api_key, prefix in (
+        ("groq", settings.groq_base_url, settings.groq_api_key, settings.groq_prefix),
+        ("mistral", settings.mistral_base_url, settings.mistral_api_key, settings.mistral_prefix),
+        ("ollama", settings.ollama_base_url, settings.ollama_api_key, settings.ollama_prefix),
+    ):
+        if base_url is not None:
+            mounted.append(
+                MountedProvider(
+                    OpenAICompatibleProvider(name=name, base_url=base_url, api_key=api_key),
+                    prefix,
+                )
+            )
+
+    return mounted
+
+
+def build_provider_registry(mounted: list[MountedProvider]) -> ProviderRegistry:
     registry = ProviderRegistry()
-    registry.register(
-        OpenAIProvider(base_url=settings.openai_base_url, api_key=settings.openai_api_key)
-    )
+    for entry in mounted:
+        registry.register(entry.provider)
     return registry
 
 
@@ -86,12 +150,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.started_at = time.monotonic()
     app.state.health = HealthRegistry(timeout_seconds=settings.health_check_timeout_seconds)
-    app.state.providers = build_provider_registry(settings)
     app.state.upstream_client = build_upstream_client(settings)
     app.state.proxy = ProxyService(app.state.upstream_client)
 
     app.state.token_counters = TokenCounterFactory.from_settings(settings)
-    app.state.pipeline = build_pipeline(settings, app.state.token_counters)
+
+    # Plugins attach to the registry and detector *before* the pipeline is built.
+    # `load()` and `attach()` never raise: a third-party package must not be able to
+    # stop this gateway from starting.
+    options = OptimizerOptions.from_settings(settings)
+    registry = build_transformer_registry(options)
+    detector = ContentDetector()
+
+    plugins = PluginManager.from_settings(settings)
+    plugins.load()
+    plugin_report = plugins.attach(registry, detector)
+    app.state.plugins = plugins
+
+    app.state.pipeline = build_pipeline(
+        settings, app.state.token_counters, registry=registry, detector=detector
+    )
 
     # tiktoken fetches its encoding over the network on first use. Do it now, in a
     # worker thread, so the cost never lands inside a user's request. A failure is
@@ -109,9 +187,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         environment=settings.environment.value,
         docs_enabled=settings.docs_enabled,
         probes=app.state.health.names,
-        providers=app.state.providers.names,
+        providers={entry.provider.name: entry.prefix for entry in app.state.mounted_providers},
         optimization_enabled=settings.optimization_enabled,
         exact_token_counting=exact_tokens,
+        transformers=registry.names,
+        plugins_enabled=plugin_report.enabled,
+        plugins_failed=tuple(record.name for record in plugin_report.failed),
     )
 
     try:
@@ -139,6 +220,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
+    # Providers are constructed here — synchronously, no I/O — so their route
+    # prefixes are known before the app serves. The registry and per-provider
+    # policies are read at request time; the pipeline they use is built in lifespan.
+    mounted = build_providers(settings)
+    app.state.mounted_providers = mounted
+    app.state.providers = build_provider_registry(mounted)
+
+    # Per-provider optimization policy. The pipeline is shared and provider-agnostic;
+    # what differs by provider — its eligible endpoints — is bound here and handed to
+    # the pipeline per request. Adapters travel on the provider itself.
+    app.state.provider_policies = {
+        entry.provider.name: build_provider_policy(settings, entry.provider.endpoint_policy)
+        for entry in mounted
+    }
+
     # Middleware added last is outermost. RequestContextMiddleware must wrap CORS
     # so that preflight responses also carry a request id.
     if settings.cors_allow_origins:
@@ -160,6 +256,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router)
+
+    # One proxy router per provider, at its configured prefix. The route knows its
+    # provider by name; it holds no provider logic of its own.
+    for entry in mounted:
+        app.include_router(
+            create_proxy_router(provider_name=entry.provider.name, prefix=entry.prefix)
+        )
 
     return app
 
