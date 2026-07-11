@@ -15,7 +15,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from gateway.optimizers.extraction import PayloadAdapter, Segment, text_parts
+from gateway.optimizers.extraction import (
+    DocumentSegment,
+    PayloadAdapter,
+    Segment,
+    document_parts,
+    text_parts,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -40,7 +46,7 @@ class ChatCompletionsAdapter(PayloadAdapter):
     def matches(self, path: str) -> bool:
         return path.strip("/").lower() == "chat/completions"
 
-    def extract(self, payload: dict[str, Any]) -> Iterator[Segment]:
+    def extract(self, payload: dict[str, Any]) -> Iterator[Segment | DocumentSegment]:
         messages = payload.get("messages")
         if not isinstance(messages, list):
             return
@@ -54,6 +60,7 @@ class ChatCompletionsAdapter(PayloadAdapter):
                 yield Segment(message, "content", content, origin)
             elif isinstance(content, list):
                 yield from text_parts(content, origin, text_keys=self._TEXT_PART_KEYS)
+                yield from document_parts(content, origin)
 
 
 class ResponsesAdapter(PayloadAdapter):
@@ -65,7 +72,7 @@ class ResponsesAdapter(PayloadAdapter):
     def matches(self, path: str) -> bool:
         return path.strip("/").lower() == "responses"
 
-    def extract(self, payload: dict[str, Any]) -> Iterator[Segment]:
+    def extract(self, payload: dict[str, Any]) -> Iterator[Segment | DocumentSegment]:
         instructions = payload.get("instructions")
         if isinstance(instructions, str) and instructions:
             yield Segment(payload, "instructions", instructions, "instructions")
@@ -85,6 +92,7 @@ class ResponsesAdapter(PayloadAdapter):
                     yield from text_parts(
                         content, f"{origin}.content", text_keys=self._TEXT_PART_KEYS
                     )
+                    yield from document_parts(content, f"{origin}.content")
 
 
 class OpenAIAssistantsAdapter(PayloadAdapter):
@@ -148,7 +156,7 @@ class AnthropicMessagesAdapter(PayloadAdapter):
         normalized = path.strip("/").lower()
         return normalized.endswith("messages") and not normalized.endswith("batches")
 
-    def extract(self, payload: dict[str, Any]) -> Iterator[Segment]:
+    def extract(self, payload: dict[str, Any]) -> Iterator[Segment | DocumentSegment]:
         system = payload.get("system")
         if isinstance(system, str) and system:
             yield Segment(payload, "system", system, "system")
@@ -167,6 +175,7 @@ class AnthropicMessagesAdapter(PayloadAdapter):
                 yield Segment(message, "content", content, origin)
             elif isinstance(content, list):
                 yield from text_parts(content, origin, text_keys=self._TEXT_PART_KEYS)
+                yield from document_parts(content, origin)
 
 
 def anthropic_adapters() -> tuple[PayloadAdapter, ...]:

@@ -18,11 +18,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from gateway.api.router import api_router
 from gateway.api.routes.proxy import create_proxy_router
+from gateway.cache import build_transformation_cache
 from gateway.config import Settings, get_settings
+from gateway.documents import build_document_service
 from gateway.errors import register_exception_handlers
-from gateway.health import HealthRegistry
+from gateway.health import ComponentHealth, HealthRegistry, HealthStatus
 from gateway.logging import configure_logging, get_logger
 from gateway.middleware.request_context import (
+    CACHE_HEADER,
     GATEWAY_REQUEST_ID_HEADER,
     OPTIMIZATION_HEADER,
     PROCESS_TIME_HEADER,
@@ -48,7 +51,7 @@ from gateway.providers import (
 from gateway.tokenizers import TokenCounterFactory
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from gateway.providers import Provider
 
@@ -143,6 +146,26 @@ def build_provider_registry(mounted: list[MountedProvider]) -> ProviderRegistry:
     return registry
 
 
+def _make_cache_probe(cache: object) -> Callable[[], Awaitable[ComponentHealth]]:
+    """A readiness probe for the Redis cache backend.
+
+    Reports ``DEGRADED`` (not ``UNHEALTHY``) when Redis is unreachable: the gateway
+    still serves every request, it just recomputes instead of reusing. The ping runs in
+    a worker thread because the backend is synchronous.
+    """
+    from gateway.cache import TransformationCache
+
+    assert isinstance(cache, TransformationCache)  # noqa: S101 — internal wiring invariant
+
+    async def probe() -> ComponentHealth:
+        reachable = await anyio.to_thread.run_sync(cache.probe)
+        status = HealthStatus.OK if reachable else HealthStatus.DEGRADED
+        detail = None if reachable else "cache backend unreachable; serving without cache"
+        return ComponentHealth(name="cache", status=status, detail=detail)
+
+    return probe
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Own the lifecycle of every long-lived resource the app holds."""
@@ -167,9 +190,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     plugin_report = plugins.attach(registry, detector)
     app.state.plugins = plugins
 
+    document_service = build_document_service(settings)
+    app.state.documents = document_service
+
+    # The transformation cache: identical content is extracted/normalized once and
+    # reused. Always constructed; a no-op when disabled. Its backend failing (Redis
+    # down) degrades to a cache miss, never a request failure.
+    cache = build_transformation_cache(settings)
+    app.state.cache = cache
+
     app.state.pipeline = build_pipeline(
-        settings, app.state.token_counters, registry=registry, detector=detector
+        settings,
+        app.state.token_counters,
+        registry=registry,
+        detector=detector,
+        document_service=document_service,
+        cache=cache,
     )
+
+    # A Redis cache is a real dependency, so it gets a readiness probe — but a
+    # *degraded* one: an unreachable cache slows the gateway, it does not stop it
+    # serving, so it must not fail readiness and pull the pod from the balancer.
+    if settings.cache_enabled and cache.backend_name == "redis":
+        app.state.health.register("cache", _make_cache_probe(cache))
 
     # tiktoken fetches its encoding over the network on first use. Do it now, in a
     # worker thread, so the cost never lands inside a user's request. A failure is
@@ -191,6 +234,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         optimization_enabled=settings.optimization_enabled,
         exact_token_counting=exact_tokens,
         transformers=registry.names,
+        documents_enabled=document_service.enabled,
+        cache_enabled=cache.enabled,
+        cache_backend=cache.backend_name,
         plugins_enabled=plugin_report.enabled,
         plugins_failed=tuple(record.name for record in plugin_report.failed),
     )
@@ -199,6 +245,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await app.state.upstream_client.aclose()
+        cache.close()
         logger.info("application_stopped", service=settings.app_name)
 
 
@@ -250,6 +297,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 PROCESS_TIME_HEADER,
                 OPTIMIZATION_HEADER,
                 TOKENS_SAVED_HEADER,
+                CACHE_HEADER,
             ],
         )
     app.add_middleware(RequestContextMiddleware, quiet_paths=QUIET_PATHS)

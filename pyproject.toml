@@ -23,6 +23,15 @@ dependencies = [
     # Exact token counts. Encodings are fetched on first use, so the Docker image
     # pre-warms the cache at build time; see TIKTOKEN_CACHE_DIR in the Dockerfile.
     "tiktoken>=0.8.0",
+    # Document extraction. pdfplumber reads PDFs; python-docx reads DOCX. Both are
+    # used only inside their extractor and imported lazily, so their absence
+    # degrades a format to "cannot extract" rather than breaking startup.
+    "pdfplumber>=0.11.0",
+    "python-docx>=1.1.0",
+    # Shared transformation cache. Imported lazily inside the Redis backend, which
+    # degrades to "always miss" if the server is unreachable — so this is only needed
+    # when LLMGATEWAY_CACHE_BACKEND=redis, and its absence never breaks startup.
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
@@ -93,7 +102,7 @@ ignore = ["ANN401"]  # allow `Any` in narrow, well-documented spots
 # Asserts are the point of a test; the "hardcoded secrets" are fakes we grep logs for.
 "tests/*" = ["ANN", "TC", "S101", "S105", "S106"]
 # Benchmark corpora are generated from a fixed seed; `random` is the point, not a flaw.
-"benchmarks/*" = ["S311"]
+"benchmarks/*" = ["S311", "S101"]
 # Example plugins are standalone packages, linted on their own terms.
 "examples/*" = ["ANN", "TC", "S101", "INP001"]
 

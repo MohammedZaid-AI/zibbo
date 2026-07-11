@@ -23,6 +23,7 @@ from fastapi import APIRouter, Request, Response
 
 from gateway.api.deps import PipelineDep, ProviderRegistryDep, ProxyServiceDep
 from gateway.middleware.request_context import (
+    CACHE_HEADER,
     OPTIMIZATION_HEADER,
     TOKENS_SAVED_HEADER,
 )
@@ -96,6 +97,12 @@ def create_proxy_router(*, provider_name: str, prefix: str) -> APIRouter:
             response.headers[TOKENS_SAVED_HEADER] = str(report.tokens_saved)
         elif report.skip_reason is not None:
             response.headers[OPTIMIZATION_HEADER] = f"skipped:{report.skip_reason.value}"
+
+        # Whether the work behind this request was reused from the cache: `hit` (all
+        # segments), `miss` (none), or `partial` (a mix). Absent when nothing was
+        # eligible to cache.
+        if report.cache_status is not None:
+            response.headers[CACHE_HEADER] = report.cache_status
 
         return response
 

@@ -103,6 +103,10 @@ class TiktokenCounter(TokenCounter):
         return self._encoding_name
 
     @property
+    def identity(self) -> str:
+        return f"tiktoken:{self._encoding_name}"
+
+    @property
     def exact(self) -> bool:
         return True
 

@@ -94,6 +94,11 @@ class TransformationResult:
     origin: str
     """Where in the payload this came from, e.g. ``messages[2].content``."""
 
+    cache_hit: bool = False
+    """Whether this result was served from the transformation cache rather than
+    computed. When true, ``execution_time_ms`` is the warm-lookup cost, not the cold
+    transformation cost the entry originally recorded."""
+
     @property
     def tokens_saved(self) -> int:
         return self.original_token_count - self.transformed_token_count
@@ -174,6 +179,23 @@ class TransformationReport:
     def content_types_detected(self) -> tuple[str, ...]:
         seen = {result.detected_content_type.value for result in self.results}
         return tuple(sorted(seen))
+
+    @property
+    def cache_hits(self) -> int:
+        return sum(1 for result in self.results if result.cache_hit)
+
+    @property
+    def cache_status(self) -> str | None:
+        """``hit`` when every result came from cache, ``miss`` when none did,
+        ``partial`` for a mix, ``None`` when there were no results to cache."""
+        if not self.results:
+            return None
+        hits = self.cache_hits
+        if hits == 0:
+            return "miss"
+        if hits == len(self.results):
+            return "hit"
+        return "partial"
 
 
 def _pct(saved: int, original: int) -> float:

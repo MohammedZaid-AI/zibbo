@@ -55,6 +55,7 @@ body is JSON on a `POST`.
 | Mid-stream upstream failure | final SSE `error` frame (see difference 13) |
 | Tool / function calling | supported; arguments never modified |
 | Multimodal content parts | text parts optimized; image and audio parts untouched |
+| Embedded documents (base64 PDF/DOCX/…) | extracted to Markdown; see difference 14 |
 | `Authorization` passthrough | caller's key always wins |
 | Rate-limit headers | relayed unmodified |
 | Retries | left to the SDK; the gateway does not retry |
@@ -71,7 +72,8 @@ body is JSON on a `POST`.
 * **`Expect: 100-continue`.** Stripped.
 * **Redirects.** A 3xx is handed to the caller rather than followed.
 * **Percent-encoded path separators.** `%2F` in a path is normalized to `/`.
-* **Response caching.** Every request reaches the provider (Phase 8).
+* **Response caching.** Every request reaches the provider. The transformation cache
+  reuses *optimization work*, not provider responses — see difference 15.
 
 ## Verified compatible
 
@@ -235,10 +237,41 @@ This is a deviation, and it is the one place the gateway deliberately adds bytes
 response body. The alternative — silence — trades a visible error for a corrupted
 answer.
 
+### 14. Embedded documents are extracted to Markdown
+
+A base64 PDF, DOCX, CSV or XML in a `document` or `file` content block is decoded,
+converted to Markdown, and substituted in place; the block becomes a `text` block.
+The provider therefore receives *extracted text*, not the original file.
+
+* On any failure — unsupported, encrypted, corrupt, or extraction that would not save
+  tokens — the block is forwarded **exactly** as it arrived.
+* A provider with native document vision (Claude reading a PDF's layout and images)
+  no longer sees the raw document. Disable with `LLMGATEWAY_DOCUMENTS_ENABLED=false`,
+  or per-format with `LLMGATEWAY_DOCUMENTS_DISABLED_FORMATS=pdf`.
+* Raw uploads to `/v1/files` are never touched.
+
+Full design and guarantees: [DOCUMENT_TRANSFORMERS.md](DOCUMENT_TRANSFORMERS.md).
+
+### 15. Transformations are cached, but responses are not
+
+Because optimization is deterministic, the gateway caches its *outputs*: the second
+request carrying an identical document or web page reuses the first's extraction instead
+of recomputing it. This changes nothing a caller can observe about correctness — the
+optimized body is byte-identical to what a cold transformation would produce — but two
+things are worth stating:
+
+* **The provider is still called every time.** Only the gateway's pre-processing is
+  reused; response bodies are never cached. Prompt caching at the provider is unaffected.
+* Each response carries `x-llmgateway-cache`: `hit`, `miss`, or `partial`. A hit means
+  the forwarded body was assembled from cached transformation results.
+
+The cache stores only successful, deterministic transformation outputs — never a failed
+or partial extraction, never a provider response. Disable it with
+`LLMGATEWAY_CACHE_ENABLED=false`. Full design: [CACHE.md](CACHE.md).
+
 ## Not yet implemented
 
-- Anthropic-compatible endpoint (Phase 6).
-- Persisted token and cost analytics (Phase 4). Savings are measured and logged per
+- Persisted token and cost analytics (Phase 8). Savings are measured and logged per
   request, but not stored.
-- PDF, DOCX and CSV optimizers (Phase 7).
-- Response caching (Phase 8). Every request reaches the provider.
+- PPTX, XLSX, EPUB, RTF and EML extraction (detected, but no extractor yet).
+- Response caching. Every request reaches the provider.

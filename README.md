@@ -25,8 +25,9 @@ Nothing else changes.
 
 ## Status
 
-Phase 3 of 8. The gateway proxies OpenAI transparently, streaming included, and
-deterministically optimizes eligible request payloads before forwarding them.
+Phase 8 of 8. The gateway proxies OpenAI and Anthropic transparently, streaming
+included, deterministically optimizes eligible request payloads and embedded documents,
+and caches those transformations so identical content is processed only once.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -36,12 +37,15 @@ deterministically optimizes eligible request payloads before forwarding them.
 | 4 | Production hardening: chaos, streaming, security, benchmarks | done |
 | 5 | Plugin architecture and transformation SDK | done |
 | 6 | Multi-provider: OpenAI, Anthropic, Groq, Mistral, Ollama | done |
-| 7 | Token + cost analytics (Postgres) | next |
-| 8 | Next.js dashboard | |
-| 9 | PDF / DOCX optimizers, Redis cache | |
+| 7 | Document transformers: PDF, DOCX, CSV, XML, HTML | done |
+| 8 | Transformation cache: content-addressed, in-memory + Redis | done |
+| — | Token + cost analytics (Postgres) | next |
+| — | Next.js dashboard | |
 
 Reference: [ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
 [PROVIDERS.md](docs/PROVIDERS.md) ·
+[DOCUMENT_TRANSFORMERS.md](docs/DOCUMENT_TRANSFORMERS.md) ·
+[CACHE.md](docs/CACHE.md) ·
 [EXTENDING.md](docs/EXTENDING.md) ·
 [PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md) ·
 [COMPATIBILITY.md](docs/COMPATIBILITY.md) ·
@@ -67,8 +71,9 @@ Measured on generated corpora with `python -m benchmarks.run`, reproducible offl
 docker compose up --build
 ```
 
-Postgres and Redis start alongside the gateway; neither is used yet, but the
-readiness endpoint will begin probing them as later phases wire them in.
+Postgres and Redis start alongside the gateway. Redis backs the transformation cache
+when `LLMGATEWAY_CACHE_BACKEND=redis` (the default is in-memory, needing neither);
+Postgres is reserved for the analytics phase.
 
 ### Local
 
@@ -115,6 +120,19 @@ x-llmgateway-optimization: applied
 x-llmgateway-tokens-saved: 110
 ```
 
+Attach a PDF, DOCX, CSV or XML (as a provider `document`/`file` block) and the gateway
+extracts it to clean Markdown before forwarding — 70–90% fewer tokens than the base64,
+which the model reads better anyway. A document it cannot read is passed through
+untouched. See [docs/DOCUMENT_TRANSFORMERS.md](docs/DOCUMENT_TRANSFORMERS.md).
+
+Because optimization is deterministic, its results are cached: send the same document
+or web page twice and the second request reuses the first's extraction instead of
+redoing it — a warm 100-page PDF drops from seconds to under two milliseconds. The cache
+is content-addressed (SHA-256), in-memory by default or Redis for a shared, multi-replica
+store, and it caches only transformation outputs — never provider responses, never a
+failed extraction. Each response says `x-llmgateway-cache: hit|miss|partial`. See
+[docs/CACHE.md](docs/CACHE.md).
+
 Set `LLMGATEWAY_OPTIMIZATION_ENABLED=false` for a pure passthrough. Design and
 guarantees: [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
 
@@ -126,6 +144,7 @@ guarantees: [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
 | any | `/anthropic/*` | Anthropic-compatible proxy |
 | any | `/{groq,mistral,ollama}/v1/*` | OpenAI-compatible providers (when configured) |
 | `GET` | `/internal/plugins` | Discovered plugins, including failures and why |
+| `GET` | `/internal/cache` | Transformation-cache backend, counters, and hit rate |
 | `GET` | `/health` | Service summary: version, environment, uptime |
 | `GET` | `/health/live` | Liveness. Touches no dependency, never fails while the process runs |
 | `GET` | `/health/ready` | Readiness. Probes every dependency; `503` if any is unhealthy |
@@ -179,7 +198,9 @@ mypy gateway
 Benchmarks and the JavaScript compatibility suite need a running upstream:
 
 ```bash
-python -m benchmarks.run                 # token reduction per document type
+python -m benchmarks.run                 # token reduction per content type
+python -m benchmarks.documents           # PDF/DOCX/CSV/XML extraction
+python -m benchmarks.cache               # cold vs warm transformation, CPU saved
 python -m benchmarks.large_payload       # 1/5/10 MB: latency, memory, degradation
 
 uvicorn benchmarks.upstream:app --port 8124 --no-access-log
@@ -206,10 +227,14 @@ gateway/
                 base.py       Transformer ABC
                 models.py     Report, result, content types
                 transformers/ html.py, json.py, text.py
+  cache/        backend.py    Byte-store interface (memory, Redis, …)
+                memory.py     Bounded thread-safe LRU
+                redis.py      Shared store, degrades to a miss when down
+                service.py    Keys, (de)serialization, stats, safety
   tokenizers/   tiktoken with an offline heuristic fallback
   middleware/   Request context, timing, access log
-  analytics/    Token and cost accounting            (Phase 4)
-  storage/      Postgres repositories, Redis cache   (Phase 4, 8)
+  analytics/    Token and cost accounting            (next)
+  storage/      Postgres repositories                (next)
   utils/        Shared helpers
   config.py     Typed settings from the environment
   errors.py     Exception hierarchy and the wire error format

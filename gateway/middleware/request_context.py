@@ -33,6 +33,7 @@ GATEWAY_REQUEST_ID_HEADER: Final = "x-llmgateway-request-id"
 PROCESS_TIME_HEADER: Final = "x-process-time"
 OPTIMIZATION_HEADER: Final = "x-llmgateway-optimization"
 TOKENS_SAVED_HEADER: Final = "x-llmgateway-tokens-saved"
+CACHE_HEADER: Final = "x-llmgateway-cache"
 
 _request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 

@@ -7,6 +7,7 @@ DOCX and CSV transformers here; nothing upstream of this module changes.
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING
 
 from gateway.errors import ConfigurationError
@@ -54,3 +55,19 @@ class TransformerRegistry:
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(transformer.name for transformer in self._transformers)
+
+    @property
+    def fingerprint(self) -> str:
+        """A stable digest of every registered transformer's name and version.
+
+        The transformation cache keys on this rather than on the single transformer
+        that ran, because *which* transformer runs is itself a deterministic function
+        of the content — so the whole registry is the unit that must stay fixed for a
+        cached output to remain valid. Registering, removing, or version-bumping any
+        transformer (a plugin included) changes the digest and retires the old cache.
+        """
+        material = ";".join(
+            f"{transformer.name}@{transformer.version}"
+            for transformer in sorted(self._transformers, key=lambda item: item.name)
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]

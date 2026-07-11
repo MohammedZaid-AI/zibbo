@@ -54,6 +54,18 @@ class TokenizerBackend(StrEnum):
     HEURISTIC = "heuristic"
 
 
+class CacheBackend(StrEnum):
+    """Where transformation results are cached.
+
+    ``MEMORY`` is per-process and needs nothing external. ``REDIS`` is shared across
+    replicas and survives a restart; it degrades to "always miss" if Redis is
+    unreachable, so a cache outage slows the gateway but never breaks it.
+    """
+
+    MEMORY = "memory"
+    REDIS = "redis"
+
+
 class LogLevel(StrEnum):
     DEBUG = "DEBUG"
     INFO = "INFO"
@@ -168,6 +180,41 @@ class Settings(BaseSettings):
     html_preserve_links: bool = True
     html_preserve_images: bool = True
 
+    # -- Documents ---------------------------------------------------------
+    # Uploaded documents (PDF, DOCX, CSV, XML, HTML, Markdown) embedded as base64 in
+    # a request are extracted to Markdown before forwarding. On any failure the
+    # original is passed through unchanged. See docs/DOCUMENT_TRANSFORMERS.md.
+    documents_enabled: bool = True
+
+    documents_max_decoded_bytes: Annotated[int, Field(gt=0)] = 16_000_000
+    """A decoded document larger than this is forwarded as-is rather than parsed."""
+
+    documents_disabled_formats: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    """Format names (pdf, docx, csv, xml, html, markdown, text) to skip."""
+
+    # -- Transformation cache ----------------------------------------------
+    # An identical document or text segment is transformed once; later requests reuse
+    # the stored Markdown, token counts and metadata. Only deterministic transformation
+    # *outputs* are cached — never provider responses, never failed extractions.
+    # See docs/CACHE.md.
+    cache_enabled: bool = True
+
+    cache_backend: CacheBackend = CacheBackend.MEMORY
+    """``memory`` (per-process) or ``redis`` (shared, needs ``redis_url``)."""
+
+    cache_ttl_seconds: Annotated[int, Field(ge=0)] = 0
+    """Entry lifetime; ``0`` means no expiry. Deterministic output does not go stale,
+    so a TTL is only for bounding a Redis keyspace, not correctness."""
+
+    cache_max_entries: Annotated[int, Field(gt=0)] = 2048
+    """In-memory backend only: LRU eviction above this many entries."""
+
+    cache_max_bytes: Annotated[int, Field(gt=0)] = 128_000_000
+    """In-memory backend only: LRU eviction above this many bytes of cached output."""
+
+    cache_redis_prefix: str = "llmgateway:xform:"
+    """Namespace for this gateway's keys, so one Redis can serve several deployments."""
+
     # -- Tokenizer ---------------------------------------------------------
     tokenizer: TokenizerBackend = TokenizerBackend.AUTO
     tokenizer_default_encoding: str = "o200k_base"
@@ -197,7 +244,13 @@ class Settings(BaseSettings):
     # -- Health ------------------------------------------------------------
     health_check_timeout_seconds: Annotated[float, Field(gt=0)] = 2.0
 
-    @field_validator("cors_allow_origins", "plugins_load", "plugins_disabled", mode="before")
+    @field_validator(
+        "cors_allow_origins",
+        "plugins_load",
+        "plugins_disabled",
+        "documents_disabled_formats",
+        mode="before",
+    )
     @classmethod
     def _parse_string_list(cls, value: Any) -> Any:
         """Accept ``a,b``, ``["a","b"]``, or an already-parsed list.

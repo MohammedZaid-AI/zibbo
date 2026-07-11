@@ -33,7 +33,9 @@ from gateway.optimizers.registry import TransformerRegistry
 from gateway.optimizers.transformers import HtmlTransformer, JsonTransformer, TextTransformer
 
 if TYPE_CHECKING:
+    from gateway.cache import TransformationCache
     from gateway.config import Settings
+    from gateway.documents import DocumentService
     from gateway.tokenizers import TokenCounterFactory
 
 __all__ = [
@@ -75,6 +77,8 @@ def build_pipeline(
     *,
     registry: TransformerRegistry | None = None,
     detector: ContentDetector | None = None,
+    document_service: DocumentService | None = None,
+    cache: TransformationCache | None = None,
 ) -> TransformationPipeline:
     """Assemble the provider-agnostic pipeline from configuration.
 
@@ -82,9 +86,10 @@ def build_pipeline(
     attach to them *before* the pipeline is built. This module knows nothing about
     plugins, and must not: the dependency runs the other way.
 
-    Per-provider policy and adapters are *not* built here — they are passed to
-    :meth:`TransformationPipeline.transform` per request by the provider that owns
-    the route. See :func:`build_provider_policy`.
+    ``document_service`` extracts embedded PDF/DOCX/etc. documents; when ``None``,
+    document blocks are left untouched. Per-provider policy and adapters are *not*
+    built here — they are passed to :meth:`TransformationPipeline.transform` per
+    request by the provider that owns the route.
     """
     options = OptimizerOptions.from_settings(settings)
     return TransformationPipeline(
@@ -92,6 +97,8 @@ def build_pipeline(
         registry=registry if registry is not None else build_transformer_registry(options),
         token_counters=token_counters,
         options=options,
+        document_service=document_service,
+        cache=cache,
         offload_threshold_bytes=settings.optimization_offload_threshold_bytes,
     )
 

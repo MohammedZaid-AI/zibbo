@@ -112,6 +112,12 @@ in a worker thread. Parsing a multi-megabyte document is tens of milliseconds of
 CPU, and holding the event loop stalls every other in-flight request, including
 active streams.
 
+A segment may also be a **document**: a base64 PDF, DOCX, CSV or XML in a provider
+`document`/`file` block. The pipeline hands it to a `DocumentService`, which decodes,
+detects the real format from its bytes, extracts Markdown, and — only if that is
+cheaper — rewrites the block. Every document format is an isolated extractor; the
+pipeline knows only the service. See [DOCUMENT_TRANSFORMERS.md](DOCUMENT_TRANSFORMERS.md).
+
 If nothing changed, the **original bytes** are forwarded — not a re-serialization of
 them.
 
@@ -138,8 +144,8 @@ that Phase 5 will build require zero transformer changes.
 
 Two invariants, enforced by property-based tests over thousands of generated inputs:
 
-* **Deterministic.** `T(x)` is the same in every process. Phase 8 will cache on a
-  hash of the transformed body; a non-deterministic transformer would poison it.
+* **Deterministic.** `T(x)` is the same in every process. The transformation cache
+  keys on a hash of the input; a non-deterministic transformer would poison it.
 * **Idempotent.** `T(T(x)) == T(x)`. A request replayed through two gateway hops must
   not be transformed twice into something different.
 
@@ -174,6 +180,30 @@ for a content type the detector cannot recognize would never run. Capabilities
 does not load, since the pipeline's cache and idempotency guarantees depend on them.
 
 See [PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md).
+
+## Transformation cache
+
+Optimization is deterministic, so transforming the same content twice is waste.
+`gateway/cache/` does it once: hash the input, look it up, and on a hit reuse the stored
+result instead of re-extracting and re-counting. The pipeline consults one object,
+`TransformationCache`, and the gateway core is unaware the cache exists.
+
+The design turns on two decisions. First, the **cache key** commits to everything that
+determines a transformation's output — the content hash, a fingerprint of the applicable
+transformers and their versions, the gateway version, the options in force, and the
+tokenizer encoding (because token counts are cached too). Invalidation is therefore not
+an operation but a consequence: change any of these and the key changes, so a stale
+result can never be served. Second, a **backend is just a byte store** with per-key
+expiry, which is what makes in-memory, Redis, and a future Postgres or S3 store
+interchangeable.
+
+Safety mirrors the rest of the gateway. A failed or partial transformation is never
+cached — only completed, deterministic outputs. A corrupt stored entry is treated as a
+miss, dropped, and recomputed. A backend failure (Redis down) degrades to a miss rather
+than an error: **a cache outage slows the gateway, it never breaks it.** Provider
+responses are never cached; only the gateway's own pre-processing is reused.
+
+See [CACHE.md](CACHE.md).
 
 ## Content detection
 

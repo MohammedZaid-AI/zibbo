@@ -28,8 +28,11 @@ from typing import TYPE_CHECKING, Any
 
 import anyio.to_thread
 
+from gateway.cache import CachedTransformation
 from gateway.logging import get_logger
+from gateway.optimizers.extraction import DocumentSegment
 from gateway.optimizers.models import (
+    ContentType,
     SkipReason,
     TransformationReport,
     TransformationResult,
@@ -37,6 +40,8 @@ from gateway.optimizers.models import (
 )
 
 if TYPE_CHECKING:
+    from gateway.cache import TransformationCache
+    from gateway.documents import DocumentFormat, DocumentService
     from gateway.optimizers.detector import ContentDetector
     from gateway.optimizers.extraction import AdapterRegistry, Segment
     from gateway.optimizers.models import TransformationRequest
@@ -46,6 +51,20 @@ if TYPE_CHECKING:
     from gateway.tokenizers import TokenCounter, TokenCounterFactory
 
 logger = get_logger(__name__)
+
+_DOCUMENT_CONTENT_TYPES: dict[str, ContentType] = {
+    "pdf": ContentType.PDF,
+    "docx": ContentType.DOCX,
+    "csv": ContentType.CSV,
+    "xml": ContentType.XML,
+    "html": ContentType.HTML,
+    "markdown": ContentType.TEXT,
+    "text": ContentType.TEXT,
+}
+
+
+def _document_content_type(fmt: DocumentFormat) -> ContentType:
+    return _DOCUMENT_CONTENT_TYPES.get(fmt.value, ContentType.BINARY)
 
 
 class TransformationPipeline:
@@ -66,12 +85,16 @@ class TransformationPipeline:
         registry: TransformerRegistry,
         token_counters: TokenCounterFactory,
         options: OptimizerOptions,
+        document_service: DocumentService | None = None,
+        cache: TransformationCache | None = None,
         offload_threshold_bytes: int = 131_072,
     ) -> None:
         self._detector = detector
         self._registry = registry
         self._token_counters = token_counters
         self._options = options
+        self._document_service = document_service
+        self._cache = cache
         self._offload_threshold_bytes = offload_threshold_bytes
 
     async def transform(
@@ -122,7 +145,7 @@ class TransformationPipeline:
         counter = self._token_counters.for_model(_model_of(payload))
         results = [
             result
-            for result in (self._transform_segment(segment, counter) for segment in segments)
+            for result in (self._process_segment(segment, counter) for segment in segments)
             if result is not None
         ]
 
@@ -143,12 +166,188 @@ class TransformationPipeline:
             results=tuple(results),
         )
 
+    def _process_segment(
+        self, segment: Segment | DocumentSegment, counter: TokenCounter
+    ) -> TransformationResult | None:
+        if isinstance(segment, DocumentSegment):
+            return self._extract_document(segment, counter)
+        return self._transform_segment(segment, counter)
+
+    # -- Cache glue --------------------------------------------------------
+
+    def _apply_cached(
+        self, cached: CachedTransformation, segment: Segment | DocumentSegment
+    ) -> TransformationResult:
+        """Rebuild a result from a cache hit and write it back into the payload.
+
+        The stored entry is content-derived; the only thing added back is ``origin``,
+        which is where *this* request's segment lived. A hit that actually changed the
+        content replays the same ``replace`` a fresh transformation would have done.
+        """
+        if cached.changed:
+            segment.replace(cached.transformed_content)
+        return TransformationResult(
+            transformation_name=cached.transformation_name,
+            detected_content_type=ContentType(cached.content_type),
+            transformed_content=cached.transformed_content,
+            original_size_bytes=cached.original_size_bytes,
+            transformed_size_bytes=cached.transformed_size_bytes,
+            original_token_count=cached.original_token_count,
+            transformed_token_count=cached.transformed_token_count,
+            execution_time_ms=cached.execution_time_ms,
+            transformations_applied=cached.steps,
+            origin=segment.origin,
+            cache_hit=True,
+        )
+
+    @staticmethod
+    def _to_cache_entry(
+        result: TransformationResult, *, transformer_version: str
+    ) -> CachedTransformation:
+        return CachedTransformation(
+            transformation_name=result.transformation_name,
+            transformer_version=transformer_version,
+            content_type=result.detected_content_type.value,
+            transformed_content=result.transformed_content,
+            original_size_bytes=result.original_size_bytes,
+            transformed_size_bytes=result.transformed_size_bytes,
+            original_token_count=result.original_token_count,
+            transformed_token_count=result.transformed_token_count,
+            steps=result.transformations_applied,
+            execution_time_ms=result.execution_time_ms,
+        )
+
+    def _extract_document(
+        self, segment: DocumentSegment, counter: TokenCounter
+    ) -> TransformationResult | None:
+        """Decode an embedded document to Markdown, if that is cheaper than the base64.
+
+        The same never-grow guard as text applies, and here it does real work: a
+        scanned PDF that yields no text, or a tiny document whose Markdown plus JSON
+        overhead exceeds its base64, is left exactly as it arrived.
+        """
+        if self._document_service is None or not self._document_service.enabled:
+            return None
+
+        cache = self._cache if self._cache is not None and self._cache.enabled else None
+        key = None
+        if cache is not None:
+            key = cache.document_key(
+                segment.data,
+                service_version=self._document_service.version,
+                media_type=segment.media_type,
+                filename=segment.filename,
+                encoding=counter.identity,
+            )
+            cached = cache.get(key)
+            if cached is not None:
+                return self._apply_cached(cached, segment)
+
+        result, cacheable = self._compute_document(segment, counter)
+        # Only successful extractions are cached. A failed one (encrypted, corrupt,
+        # scanned) might succeed on a future request or a fixed extractor, and the spec
+        # is explicit: never cache a failed transformation.
+        if cache is not None and key is not None and cacheable and result is not None:
+            entry = self._to_cache_entry(result, transformer_version=self._document_service.version)
+            cache.put(key, entry)
+        return result
+
+    def _compute_document(
+        self, segment: DocumentSegment, counter: TokenCounter
+    ) -> tuple[TransformationResult | None, bool]:
+        assert self._document_service is not None  # noqa: S101 — guarded by the caller
+        started = time.perf_counter()
+        result = self._document_service.extract(
+            segment.data, media_type=segment.media_type, filename=segment.filename
+        )
+        content_type = _document_content_type(result.format)
+
+        if not result.extracted:
+            logger.debug(
+                "document_not_extracted",
+                document_format=result.format.value,
+                origin=segment.origin,
+                reason=result.detail,
+            )
+            failed = TransformationResult(
+                transformation_name=f"document:{result.format.value}",
+                detected_content_type=content_type,
+                transformed_content=segment.original_text,
+                original_size_bytes=len(segment.original_text.encode("utf-8")),
+                transformed_size_bytes=len(segment.original_text.encode("utf-8")),
+                original_token_count=0,
+                transformed_token_count=0,
+                execution_time_ms=_elapsed_ms(started),
+                transformations_applied=(),
+                origin=segment.origin,
+            )
+            return failed, False  # extraction failed — never cached
+
+        markdown = result.markdown or ""
+        original_tokens = counter.count(segment.original_text)
+        transformed_tokens = counter.count(markdown)
+
+        if transformed_tokens >= original_tokens:
+            # A pathological case — base64 almost always tokenizes far worse than
+            # its extracted text — but the guarantee is unconditional. Extraction still
+            # *succeeded* deterministically, so this decision is safe to cache.
+            reverted = TransformationResult(
+                transformation_name=f"document:{result.format.value}",
+                detected_content_type=content_type,
+                transformed_content=segment.original_text,
+                original_size_bytes=len(segment.original_text.encode("utf-8")),
+                transformed_size_bytes=len(segment.original_text.encode("utf-8")),
+                original_token_count=original_tokens,
+                transformed_token_count=original_tokens,
+                execution_time_ms=_elapsed_ms(started),
+                transformations_applied=(),
+                origin=segment.origin,
+            )
+            return reverted, True
+
+        segment.replace(markdown)
+        extracted = TransformationResult(
+            transformation_name=f"document:{result.format.value}",
+            detected_content_type=content_type,
+            transformed_content=markdown,
+            original_size_bytes=len(segment.original_text.encode("utf-8")),
+            transformed_size_bytes=len(markdown.encode("utf-8")),
+            original_token_count=original_tokens,
+            transformed_token_count=transformed_tokens,
+            execution_time_ms=_elapsed_ms(started),
+            transformations_applied=("extracted_document", f"format_{result.format.value}"),
+            origin=segment.origin,
+        )
+        return extracted, True
+
     def _transform_segment(
         self, segment: Segment, counter: TokenCounter
     ) -> TransformationResult | None:
         if len(segment.text) < self._options.min_segment_chars:
             return None
 
+        cache = self._cache if self._cache is not None and self._cache.enabled else None
+        key = None
+        if cache is not None:
+            # Key on the whole registry, not the selected transformer: which one runs
+            # is itself a deterministic function of the content, so a hit legitimately
+            # skips detection, selection, transformation and token counting together.
+            key = cache.text_key(
+                segment.text,
+                transformer_fingerprint=self._registry.fingerprint,
+                encoding=counter.identity,
+            )
+            cached = cache.get(key)
+            if cached is not None:
+                return self._apply_cached(cached, segment)
+
+        result = self._compute_text(segment, counter)
+        if cache is not None and key is not None and result is not None:
+            entry = self._to_cache_entry(result, transformer_version=self._registry.fingerprint)
+            cache.put(key, entry)
+        return result
+
+    def _compute_text(self, segment: Segment, counter: TokenCounter) -> TransformationResult | None:
         started = time.perf_counter()
         detection = self._detector.detect(segment.text)
         transformer = self._registry.select(segment.text, detection)

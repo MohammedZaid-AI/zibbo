@@ -30,3 +30,12 @@ class TokenCounter(ABC):
         do not, and the analytics layer must say so.
         """
         return False
+
+    @property
+    def identity(self) -> str:
+        """A stable id for counters that would count the same text differently.
+
+        The transformation cache stores token counts, so it keys on this: a result
+        counted under one encoding must not be served to a request using another.
+        """
+        return self.name

@@ -28,6 +28,11 @@ class Transformer(ABC):
 
     name: ClassVar[str]
 
+    version: ClassVar[str] = "1"
+    """Bumped when the transformer's output for the same input changes. It is part of
+    the transformation cache key (via the registry fingerprint), so incrementing it
+    invalidates every entry this transformer produced without touching the store."""
+
     priority: ClassVar[int]
     """Lower runs first. The registry picks the first transformer that can handle
     the content, so a specific transformer must outrank a general one: HTML (10)

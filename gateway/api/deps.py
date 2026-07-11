@@ -10,6 +10,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
+from gateway.cache import TransformationCache
 from gateway.config import Settings, get_settings
 from gateway.health import HealthRegistry
 from gateway.optimizers import TransformationPipeline
@@ -47,6 +48,12 @@ def get_plugin_manager(request: Request) -> PluginManager:
     return plugins
 
 
+def get_cache(request: Request) -> TransformationCache:
+    """The transformation cache assembled during startup."""
+    cache: TransformationCache = request.app.state.cache
+    return cache
+
+
 def get_start_time(request: Request) -> float:
     """Monotonic timestamp captured when the application started."""
     started: float = request.app.state.started_at
@@ -60,3 +67,4 @@ ProviderRegistryDep = Annotated[ProviderRegistry, Depends(get_provider_registry)
 ProxyServiceDep = Annotated[ProxyService, Depends(get_proxy_service)]
 PipelineDep = Annotated[TransformationPipeline, Depends(get_pipeline)]
 PluginManagerDep = Annotated[PluginManager, Depends(get_plugin_manager)]
+CacheDep = Annotated[TransformationCache, Depends(get_cache)]
