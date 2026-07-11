@@ -66,14 +66,14 @@ def test_cors_origins_parse_from_the_environment(
     validator runs, so the comma-separated form — which is what .env.example and
     docker-compose.yml both use — raised SettingsError at startup.
     """
-    monkeypatch.setenv("LLMGATEWAY_CORS_ALLOW_ORIGINS", raw)
+    monkeypatch.setenv("ZIBBO_CORS_ALLOW_ORIGINS", raw)
     get_settings.cache_clear()
 
     assert get_settings().cors_allow_origins == expected
 
 
 def test_malformed_json_origins_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LLMGATEWAY_CORS_ALLOW_ORIGINS", '["unterminated')
+    monkeypatch.setenv("ZIBBO_CORS_ALLOW_ORIGINS", '["unterminated')
     get_settings.cache_clear()
 
     with pytest.raises(ValidationError, match="not valid JSON"):
@@ -95,8 +95,8 @@ def test_settings_are_frozen() -> None:
 
 
 def test_environment_is_read_from_prefixed_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LLMGATEWAY_PORT", "9101")
-    monkeypatch.setenv("LLMGATEWAY_ENVIRONMENT", "staging")
+    monkeypatch.setenv("ZIBBO_PORT", "9101")
+    monkeypatch.setenv("ZIBBO_ENVIRONMENT", "staging")
     get_settings.cache_clear()
 
     settings = get_settings()

@@ -1,9 +1,9 @@
 {
-  "name": "llmgateway-openai-js-compat",
+  "name": "zibbo-openai-js-compat",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Drives the official OpenAI JavaScript SDK against LLMGateway.",
+  "description": "Drives the official OpenAI JavaScript SDK against Zibbo.",
   "scripts": {
     "test": "node compat.test.mjs"
   },

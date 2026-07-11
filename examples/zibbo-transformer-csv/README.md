@@ -1,20 +1,20 @@
-# llmgateway-transformer-csv
+# zibbo-transformer-csv
 
-A reference [LLMGateway](../../README.md) plugin. Converts CSV and TSV tables inside
+A reference [Zibbo](../../README.md) plugin. Converts CSV and TSV tables inside
 prompts into compact Markdown tables, dropping empty rows and columns.
 
 It is here to be read. The whole plugin is one file, and the parts that matter are
 the entry point in `pyproject.toml` and the `PLUGIN` object at the bottom of
-`src/llmgateway_transformer_csv/__init__.py`.
+`src/zibbo_transformer_csv/__init__.py`.
 
 ## Install
 
 ```bash
-pip install -e examples/llmgateway-transformer-csv
+pip install -e examples/zibbo-transformer-csv
 ```
 
 That is the entire integration. The gateway discovers the plugin through the
-`llmgateway.transformers` entry point on its next start:
+`zibbo.transformers` entry point on its next start:
 
 ```bash
 curl localhost:8000/internal/plugins

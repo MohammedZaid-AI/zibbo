@@ -231,10 +231,10 @@ async def test_a_client_cannot_forge_the_optimization_headers(
     response = await client.post(
         "/v1/chat/completions",
         json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hello"}]},
-        headers={"X-LLMGateway-Tokens-Saved": "999999"},
+        headers={"X-Zibbo-Tokens-Saved": "999999"},
     )
 
-    assert response.headers.get("x-llmgateway-tokens-saved") != "999999"
+    assert response.headers.get("x-zibbo-tokens-saved") != "999999"
 
 
 async def test_hop_by_hop_headers_are_not_relayed_upstream(

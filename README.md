@@ -1,8 +1,8 @@
-# LLMGateway
+# Zibbo
 
 A drop-in API gateway that sits between your application and its LLM provider.
 
-Point your SDK's `base_url` at LLMGateway and it deterministically optimizes every
+Point your SDK's `base_url` at Zibbo and it deterministically optimizes every
 request before forwarding it upstream — stripping structural noise from HTML, PDFs,
 spreadsheets, JSON blobs and email threads, and normalizing what remains to clean
 Markdown. Fewer tokens, lower cost, cleaner context.
@@ -72,7 +72,7 @@ docker compose up --build
 ```
 
 Postgres and Redis start alongside the gateway. Redis backs the transformation cache
-when `LLMGATEWAY_CACHE_BACKEND=redis` (the default is in-memory, needing neither);
+when `ZIBBO_CACHE_BACKEND=redis` (the default is in-memory, needing neither);
 Postgres is reserved for the analytics phase.
 
 ### Local
@@ -116,8 +116,8 @@ Markdown, and forwards that. Your headings, lists, tables and code blocks surviv
 Nothing is summarized. Each response tells you what happened:
 
 ```
-x-llmgateway-optimization: applied
-x-llmgateway-tokens-saved: 110
+x-zibbo-optimization: applied
+x-zibbo-tokens-saved: 110
 ```
 
 Attach a PDF, DOCX, CSV or XML (as a provider `document`/`file` block) and the gateway
@@ -130,10 +130,10 @@ or web page twice and the second request reuses the first's extraction instead o
 redoing it — a warm 100-page PDF drops from seconds to under two milliseconds. The cache
 is content-addressed (SHA-256), in-memory by default or Redis for a shared, multi-replica
 store, and it caches only transformation outputs — never provider responses, never a
-failed extraction. Each response says `x-llmgateway-cache: hit|miss|partial`. See
+failed extraction. Each response says `x-zibbo-cache: hit|miss|partial`. See
 [docs/CACHE.md](docs/CACHE.md).
 
-Set `LLMGATEWAY_OPTIMIZATION_ENABLED=false` for a pure passthrough. Design and
+Set `ZIBBO_OPTIMIZATION_ENABLED=false` for a pure passthrough. Design and
 guarantees: [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
 
 ## Endpoints
@@ -156,7 +156,7 @@ readiness. A gateway whose database blips should stop taking traffic, not be kil
 
 ## Configuration
 
-Every setting is an environment variable prefixed with `LLMGATEWAY_`, mapping onto a
+Every setting is an environment variable prefixed with `ZIBBO_`, mapping onto a
 field of `Settings` in [gateway/config.py](gateway/config.py). See
 [.env.example](.env.example) for the full list.
 
@@ -204,7 +204,7 @@ python -m benchmarks.cache               # cold vs warm transformation, CPU save
 python -m benchmarks.large_payload       # 1/5/10 MB: latency, memory, degradation
 
 uvicorn benchmarks.upstream:app --port 8124 --no-access-log
-LLMGATEWAY_OPENAI_BASE_URL=http://127.0.0.1:8124/v1 uvicorn gateway.main:app --port 8123
+ZIBBO_OPENAI_BASE_URL=http://127.0.0.1:8124/v1 uvicorn gateway.main:app --port 8123
 python -m benchmarks.overhead --requests 600 --concurrency 1   # added latency
 cd compat/openai-js && npm install && npm test                 # JS SDK
 ```
@@ -255,11 +255,11 @@ preservation.
 and one registration line. See [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
 
 **Plugins.** A transformer can also live in its own package. `pip install
-llmgateway-transformer-csv` and the gateway discovers it through a Python entry point;
+zibbo-transformer-csv` and the gateway discovers it through a Python entry point;
 no gateway code changes. A broken plugin is recorded and skipped, never fatal.
 
 ```bash
-pip install -e examples/llmgateway-transformer-csv
+pip install -e examples/zibbo-transformer-csv
 curl localhost:8000/internal/plugins
 ```
 

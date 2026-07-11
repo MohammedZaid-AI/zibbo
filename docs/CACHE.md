@@ -98,7 +98,7 @@ The backend is synchronous on purpose. The cache is consulted on the same (often
 thread as the transformation it guards, so a blocking Redis round-trip does not stall the
 event loop for the large payloads that dominate cache value. The trade-off: a *small*
 payload transformed inline pays the round-trip on the event-loop thread. If that matters
-for a Redis deployment, lower `LLMGATEWAY_OPTIMIZATION_OFFLOAD_THRESHOLD_BYTES` so more
+for a Redis deployment, lower `ZIBBO_OPTIMIZATION_OFFLOAD_THRESHOLD_BYTES` so more
 work — and its cache lookup — moves to the pool.
 
 ## The request flow
@@ -113,7 +113,7 @@ in-place substitution a fresh transformation would have done, adding back only `
 (where this request's segment lived). A miss transforms as before, then stores — but only
 if the result is cacheable by the rules above.
 
-Every proxied response carries `x-llmgateway-cache`: `hit` (every segment reused), `miss`
+Every proxied response carries `x-zibbo-cache`: `hit` (every segment reused), `miss`
 (none), or `partial` (a mix). `GET /internal/cache` reports the running counters —
 hits, misses, stores, corrupted, and the hit rate.
 
@@ -156,13 +156,13 @@ a spec pasted into every message — are where this pays off most.
 
 | Variable | Effect |
 |---|---|
-| `LLMGATEWAY_CACHE_ENABLED` | Master switch. `true` by default; when off the cache is a wired no-op. |
-| `LLMGATEWAY_CACHE_BACKEND` | `memory` or `redis`. |
-| `LLMGATEWAY_REDIS_URL` | Connection URL for the Redis backend. |
-| `LLMGATEWAY_CACHE_TTL_SECONDS` | Entry lifetime; `0` = no expiry. Deterministic output does not go stale. |
-| `LLMGATEWAY_CACHE_MAX_ENTRIES` | In-memory LRU cap (entries). |
-| `LLMGATEWAY_CACHE_MAX_BYTES` | In-memory LRU cap (bytes). |
-| `LLMGATEWAY_CACHE_REDIS_PREFIX` | Key namespace, so one Redis serves several deployments. |
+| `ZIBBO_CACHE_ENABLED` | Master switch. `true` by default; when off the cache is a wired no-op. |
+| `ZIBBO_CACHE_BACKEND` | `memory` or `redis`. |
+| `ZIBBO_REDIS_URL` | Connection URL for the Redis backend. |
+| `ZIBBO_CACHE_TTL_SECONDS` | Entry lifetime; `0` = no expiry. Deterministic output does not go stale. |
+| `ZIBBO_CACHE_MAX_ENTRIES` | In-memory LRU cap (entries). |
+| `ZIBBO_CACHE_MAX_BYTES` | In-memory LRU cap (bytes). |
+| `ZIBBO_CACHE_REDIS_PREFIX` | Key namespace, so one Redis serves several deployments. |
 
 ## Limitations
 

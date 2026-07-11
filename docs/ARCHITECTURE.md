@@ -1,6 +1,6 @@
 # Architecture
 
-LLMGateway sits between an application and an LLM provider. The application changes
+Zibbo sits between an application and an LLM provider. The application changes
 one string — its `base_url` — and everything else keeps working, while the requests
 that cross the gateway get smaller.
 
@@ -51,7 +51,7 @@ Three details that are easy to get wrong:
 **The request id.** A caller's `X-Request-ID` is honoured if it is printable and
 short; otherwise one is generated. On a *proxied* response, `x-request-id` carries
 the **provider's** id — that is what an SDK surfaces in exceptions and what provider
-support asks for — and the gateway's own id moves to `x-llmgateway-request-id`.
+support asks for — and the gateway's own id moves to `x-zibbo-request-id`.
 
 **Context variables, not parameters.** The route binds `provider`, `endpoint`, and
 the optimization metrics to structlog's contextvars. Every log line emitted while

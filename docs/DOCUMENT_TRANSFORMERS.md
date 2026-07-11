@@ -1,6 +1,6 @@
 # Document transformers
 
-LLMGateway extracts uploaded documents to clean Markdown before they reach the
+Zibbo extracts uploaded documents to clean Markdown before they reach the
 provider. A PDF, DOCX, CSV or XML embedded in a request is decoded, converted to the
 text a model can actually read, and substituted in place — deterministically, with no
 model, no summarization, no rewriting.
@@ -164,13 +164,13 @@ Two honest observations from these numbers:
 * **PPTX, XLSX, EPUB, RTF, EML are detected but not yet extracted.**
 * **Extraction changes what the provider sees.** A provider with native PDF vision
   (Claude) would no longer see the document's layout or images. Set
-  `LLMGATEWAY_DOCUMENTS_ENABLED=false`, or disable a format with
-  `LLMGATEWAY_DOCUMENTS_DISABLED_FORMATS=pdf`, to keep the raw document.
+  `ZIBBO_DOCUMENTS_ENABLED=false`, or disable a format with
+  `ZIBBO_DOCUMENTS_DISABLED_FORMATS=pdf`, to keep the raw document.
 
 ## Configuration
 
 | Variable | Effect |
 |---|---|
-| `LLMGATEWAY_DOCUMENTS_ENABLED` | Master switch. `true` by default. |
-| `LLMGATEWAY_DOCUMENTS_MAX_DECODED_BYTES` | Skip documents larger than this once decoded (16 MB). |
-| `LLMGATEWAY_DOCUMENTS_DISABLED_FORMATS` | Comma-separated formats to skip, e.g. `pdf,docx`. |
+| `ZIBBO_DOCUMENTS_ENABLED` | Master switch. `true` by default. |
+| `ZIBBO_DOCUMENTS_MAX_DECODED_BYTES` | Skip documents larger than this once decoded (16 MB). |
+| `ZIBBO_DOCUMENTS_DISABLED_FORMATS` | Comma-separated formats to skip, e.g. `pdf,docx`. |

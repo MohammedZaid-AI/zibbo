@@ -1,4 +1,4 @@
-# Extending LLMGateway
+# Extending Zibbo
 
 Four extension points. None of them require touching the gateway.
 
@@ -76,7 +76,7 @@ def build_transformer_registry(options: OptimizerOptions) -> TransformerRegistry
 
 That is the whole change. The pipeline now detects CSV in a chat message, routes it
 here, times it, counts its tokens before and after, records which steps ran, reports
-the saving in `x-llmgateway-tokens-saved`, and logs the metadata. You wrote none of
+the saving in `x-zibbo-tokens-saved`, and logs the metadata. You wrote none of
 that, and Phase 5's dashboard will show your transformer without knowing it exists.
 
 Given `name,unused,city` / `Ada,,London` / `Grace,,New York`:

@@ -45,7 +45,7 @@ against 1.0 runs on a 1.3 gateway; one written against 1.4 does not, because it 
 use API the gateway lacks. A 2.x plugin never runs on a 1.x gateway.
 """
 
-ENTRY_POINT_GROUP: Final = "llmgateway.transformers"
+ENTRY_POINT_GROUP: Final = "zibbo.transformers"
 
 _NAME_RE: Final = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _VERSION_RE: Final = re.compile(r"^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?$")
@@ -70,7 +70,7 @@ class Capability(StrEnum):
 
     LOSSY = "lossy"
     """Removes information a caller might miss. Refused unless the deployment
-    sets ``LLMGATEWAY_PLUGINS_ALLOW_LOSSY=true``."""
+    sets ``ZIBBO_PLUGINS_ALLOW_LOSSY=true``."""
 
     EXPERIMENTAL = "experimental"
     """Loads normally, but is logged at startup so operators know it is there."""

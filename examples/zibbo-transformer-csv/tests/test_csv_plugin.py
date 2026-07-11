@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from llmgateway_transformer_csv import PLUGIN, CsvSniffer, CsvTransformer
+from zibbo_transformer_csv import PLUGIN, CsvSniffer, CsvTransformer
 
 from gateway.optimizers.models import ContentType, Detection
 from gateway.plugins import PLUGIN_API_VERSION, Capability, PluginContext

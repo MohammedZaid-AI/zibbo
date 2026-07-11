@@ -250,7 +250,7 @@ class PluginManager:
         if metadata.is_lossy and not self._allow_lossy:
             raise PluginCapabilityError(
                 f"plugin {metadata.name!r} declares itself lossy; set "
-                "LLMGATEWAY_PLUGINS_ALLOW_LOSSY=true to permit it"
+                "ZIBBO_PLUGINS_ALLOW_LOSSY=true to permit it"
             )
         return metadata
 

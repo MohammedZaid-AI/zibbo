@@ -1,4 +1,4 @@
-name: llmgateway
+name: zibbo
 
 services:
   gateway:
@@ -6,24 +6,24 @@ services:
       context: .
       target: runtime
     ports:
-      - "${LLMGATEWAY_PORT:-8000}:8000"
+      - "${ZIBBO_PORT:-8000}:8000"
     environment:
-      LLMGATEWAY_ENVIRONMENT: development
-      LLMGATEWAY_DEBUG: "true"
-      LLMGATEWAY_LOG_LEVEL: INFO
-      LLMGATEWAY_LOG_FORMAT: console
-      LLMGATEWAY_CORS_ALLOW_ORIGINS: http://localhost:3000
-      LLMGATEWAY_OPENAI_BASE_URL: ${LLMGATEWAY_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      ZIBBO_ENVIRONMENT: development
+      ZIBBO_DEBUG: "true"
+      ZIBBO_LOG_LEVEL: INFO
+      ZIBBO_LOG_FORMAT: console
+      ZIBBO_CORS_ALLOW_ORIGINS: http://localhost:3000
+      ZIBBO_OPENAI_BASE_URL: ${ZIBBO_OPENAI_BASE_URL:-https://api.openai.com/v1}
       # Optional fallback keys. Callers that send their own credential override them.
-      LLMGATEWAY_OPENAI_API_KEY: ${LLMGATEWAY_OPENAI_API_KEY:-}
-      LLMGATEWAY_ANTHROPIC_API_KEY: ${LLMGATEWAY_ANTHROPIC_API_KEY:-}
+      ZIBBO_OPENAI_API_KEY: ${ZIBBO_OPENAI_API_KEY:-}
+      ZIBBO_ANTHROPIC_API_KEY: ${ZIBBO_ANTHROPIC_API_KEY:-}
       # OpenAI-compatible providers activate when their base URL is set.
-      LLMGATEWAY_GROQ_BASE_URL: ${LLMGATEWAY_GROQ_BASE_URL:-}
-      LLMGATEWAY_GROQ_API_KEY: ${LLMGATEWAY_GROQ_API_KEY:-}
-      LLMGATEWAY_OLLAMA_BASE_URL: ${LLMGATEWAY_OLLAMA_BASE_URL:-}
+      ZIBBO_GROQ_BASE_URL: ${ZIBBO_GROQ_BASE_URL:-}
+      ZIBBO_GROQ_API_KEY: ${ZIBBO_GROQ_API_KEY:-}
+      ZIBBO_OLLAMA_BASE_URL: ${ZIBBO_OLLAMA_BASE_URL:-}
       # Consumed from Phase 4 (Postgres) and Phase 8 (Redis) onward.
-      LLMGATEWAY_DATABASE_URL: postgresql://llmgateway:llmgateway@postgres:5432/llmgateway
-      LLMGATEWAY_REDIS_URL: redis://redis:6379/0
+      ZIBBO_DATABASE_URL: postgresql://zibbo:zibbo@postgres:5432/zibbo
+      ZIBBO_REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,15 +34,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: llmgateway
-      POSTGRES_PASSWORD: llmgateway
-      POSTGRES_DB: llmgateway
+      POSTGRES_USER: zibbo
+      POSTGRES_PASSWORD: zibbo
+      POSTGRES_DB: zibbo
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U llmgateway -d llmgateway"]
+      test: ["CMD-SHELL", "pg_isready -U zibbo -d zibbo"]
       interval: 5s
       timeout: 3s
       retries: 10

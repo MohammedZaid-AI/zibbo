@@ -1,6 +1,6 @@
 # Plugin development
 
-A plugin adds a content format to LLMGateway without changing the gateway. Install
+A plugin adds a content format to Zibbo without changing the gateway. Install
 the package, restart, and the gateway finds it.
 
 Everything a plugin needs is importable from `gateway.plugins`. The gateway never
@@ -19,7 +19,7 @@ The sniffer is not optional in practice. The detector routes segments by what th
 classified as plain text and normalized instead.
 
 ```python
-# src/llmgateway_transformer_csv/__init__.py
+# src/zibbo_transformer_csv/__init__.py
 import csv
 import io
 from typing import ClassVar
@@ -75,7 +75,7 @@ loading a model file — subclass `TransformerPlugin` directly and implement
 `create_transformer(context)`.
 
 The complete, working version of the above is in
-[`examples/llmgateway-transformer-csv/`](../examples/llmgateway-transformer-csv/).
+[`examples/zibbo-transformer-csv/`](../examples/zibbo-transformer-csv/).
 
 ## The contract
 
@@ -116,7 +116,7 @@ Declared in metadata, and **enforced**, not documented.
 | `deterministic` | **Required.** Same input, same output. |
 | `idempotent` | **Required.** `T(T(x)) == T(x)`. |
 | `provides_sniffer` | Required if `create_sniffers` returns anything. |
-| `lossy` | Removes information a caller might miss. Refused unless `LLMGATEWAY_PLUGINS_ALLOW_LOSSY=true`. |
+| `lossy` | Removes information a caller might miss. Refused unless `ZIBBO_PLUGINS_ALLOW_LOSSY=true`. |
 | `experimental` | Loads, but is logged at startup so operators know. |
 
 A plugin that does not declare `deterministic` and `idempotent` **does not load**. The
@@ -143,8 +143,8 @@ anything you leave unhandled.
 One line in `pyproject.toml` is the whole discovery mechanism:
 
 ```toml
-[project.entry-points."llmgateway.transformers"]
-csv = "llmgateway_transformer_csv:PLUGIN"
+[project.entry-points."zibbo.transformers"]
+csv = "zibbo_transformer_csv:PLUGIN"
 ```
 
 The value is `module:ATTRIBUTE`, where the attribute is a `TransformerPlugin`
@@ -177,13 +177,13 @@ A refused plugin is recorded as `failed` with stage `version`. Nothing else brea
 
 ## Publishing
 
-Name the package `llmgateway-transformer-<format>`. Ship the entry point, a README,
+Name the package `zibbo-transformer-<format>`. Ship the entry point, a README,
 and the plugin's own tests. Nothing else about publishing is special — it is an
 ordinary Python package on PyPI.
 
 ## Testing
 
-Copy [`examples/llmgateway-transformer-csv/tests/test_csv_plugin.py`](../examples/llmgateway-transformer-csv/tests/test_csv_plugin.py).
+Copy [`examples/zibbo-transformer-csv/tests/test_csv_plugin.py`](../examples/zibbo-transformer-csv/tests/test_csv_plugin.py).
 It covers what matters:
 
 ```python
@@ -223,13 +223,13 @@ pipeline = build_pipeline(settings, counters, registry=registry, detector=detect
 
 | Variable | Effect |
 |---|---|
-| `LLMGATEWAY_PLUGINS_ENABLED` | Master switch. `true` by default. |
-| `LLMGATEWAY_PLUGINS_ENTRY_POINT_GROUP` | Defaults to `llmgateway.transformers`. Set empty to skip entry points. |
-| `LLMGATEWAY_PLUGINS_DIR` | Load `*.py` files and packages from a directory. **Executes arbitrary code**; no default. |
-| `LLMGATEWAY_PLUGINS_LOAD` | `module:ATTR` targets, comma-separated. Highest precedence. |
-| `LLMGATEWAY_PLUGINS_DISABLED` | Names to load but not attach. |
-| `LLMGATEWAY_PLUGINS_ALLOW_LOSSY` | Permit `lossy` plugins. |
-| `LLMGATEWAY_PLUGINS_CONFIG` | JSON object keyed by plugin name; each plugin sees only its own entry. |
+| `ZIBBO_PLUGINS_ENABLED` | Master switch. `true` by default. |
+| `ZIBBO_PLUGINS_ENTRY_POINT_GROUP` | Defaults to `zibbo.transformers`. Set empty to skip entry points. |
+| `ZIBBO_PLUGINS_DIR` | Load `*.py` files and packages from a directory. **Executes arbitrary code**; no default. |
+| `ZIBBO_PLUGINS_LOAD` | `module:ATTR` targets, comma-separated. Highest precedence. |
+| `ZIBBO_PLUGINS_DISABLED` | Names to load but not attach. |
+| `ZIBBO_PLUGINS_ALLOW_LOSSY` | Permit `lossy` plugins. |
+| `ZIBBO_PLUGINS_CONFIG` | JSON object keyed by plugin name; each plugin sees only its own entry. |
 
 Precedence: explicit configuration, then directory, then entry points. The first
 source to claim a name keeps it, so an operator can override an installed plugin.

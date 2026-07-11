@@ -18,7 +18,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gateway import __version__
 
-ENV_PREFIX = "LLMGATEWAY_"
+ENV_PREFIX = "ZIBBO_"
 
 
 class Environment(StrEnum):
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     )
 
     # -- Identity ----------------------------------------------------------
-    app_name: str = "llmgateway"
+    app_name: str = "zibbo"
     app_version: str = __version__
     environment: Environment = Environment.DEVELOPMENT
 
@@ -212,7 +212,7 @@ class Settings(BaseSettings):
     cache_max_bytes: Annotated[int, Field(gt=0)] = 128_000_000
     """In-memory backend only: LRU eviction above this many bytes of cached output."""
 
-    cache_redis_prefix: str = "llmgateway:xform:"
+    cache_redis_prefix: str = "zibbo:xform:"
     """Namespace for this gateway's keys, so one Redis can serve several deployments."""
 
     # -- Tokenizer ---------------------------------------------------------
@@ -222,7 +222,7 @@ class Settings(BaseSettings):
     # -- Plugins -----------------------------------------------------------
     plugins_enabled: bool = True
 
-    plugins_entry_point_group: str = "llmgateway.transformers"
+    plugins_entry_point_group: str = "zibbo.transformers"
     """Installed packages advertising a transformer in this entry-point group."""
 
     plugins_dir: Path | None = None

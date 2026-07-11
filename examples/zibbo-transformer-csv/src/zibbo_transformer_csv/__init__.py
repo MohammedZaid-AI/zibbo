@@ -1,8 +1,8 @@
-"""A reference LLMGateway plugin: CSV to compact Markdown tables.
+"""A reference Zibbo plugin: CSV to compact Markdown tables.
 
 Everything a plugin needs comes from ``gateway.plugins``. Nothing else in the
 gateway is imported, and the gateway never imports this package — it is discovered
-through the ``llmgateway.transformers`` entry point declared in ``pyproject.toml``.
+through the ``zibbo.transformers`` entry point declared in ``pyproject.toml``.
 
 The plugin ships two things:
 
@@ -141,7 +141,7 @@ PLUGIN = simple_plugin(
     sniffers=[CsvSniffer],
     name="csv",
     version=__version__,
-    author="LLMGateway <plugins@llmgateway.dev>",
+    author="Zibbo <plugins@zibbo.dev>",
     description="Converts CSV and TSV tables to compact Markdown tables.",
     content_types={ContentType.CSV},
     # Lower runs first. After html(10) and json(20) so a JSON array of arrays is

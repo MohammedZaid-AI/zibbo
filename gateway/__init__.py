@@ -1,4 +1,4 @@
-"""LLMGateway — AI gateway and deterministic content-optimization proxy."""
+"""Zibbo — AI gateway and deterministic content-optimization proxy."""
 
 __version__ = "0.1.0"
 

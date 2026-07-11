@@ -257,4 +257,4 @@ async def test_an_enormous_body_is_forwarded_unoptimized() -> None:
 
     assert response.status_code == 200
     assert seen[0] == huge
-    assert response.headers["x-llmgateway-optimization"] == "skipped:body_too_large"
+    assert response.headers["x-zibbo-optimization"] == "skipped:body_too_large"

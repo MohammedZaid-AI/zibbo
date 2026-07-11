@@ -1,6 +1,6 @@
 # Providers
 
-LLMGateway is provider-agnostic. OpenAI and Anthropic are implemented; Groq, Mistral
+Zibbo is provider-agnostic. OpenAI and Anthropic are implemented; Groq, Mistral
 and Ollama work today as OpenAI-compatible providers; Gemini is a documented next
 step. The gateway core contains **no** provider-specific logic — every difference
 between providers is data a provider module supplies.
@@ -180,10 +180,10 @@ remove one). An OpenAI-compatible provider turns on when its base URL is set —
 is no universal default for Groq, Mistral or Ollama.
 
 ```bash
-LLMGATEWAY_ANTHROPIC_API_KEY=sk-ant-...        # fallback; caller's key still wins
-LLMGATEWAY_GROQ_BASE_URL=https://api.groq.com/openai/v1
-LLMGATEWAY_GROQ_API_KEY=gsk_...
-LLMGATEWAY_OLLAMA_BASE_URL=http://localhost:11434/v1   # no key needed
+ZIBBO_ANTHROPIC_API_KEY=sk-ant-...        # fallback; caller's key still wins
+ZIBBO_GROQ_BASE_URL=https://api.groq.com/openai/v1
+ZIBBO_GROQ_API_KEY=gsk_...
+ZIBBO_OLLAMA_BASE_URL=http://localhost:11434/v1   # no key needed
 ```
 
 ## Compatibility guarantees
@@ -201,5 +201,5 @@ Verified with each provider's official SDK, whose only non-default argument is
 * **The caller's credential always wins.**
 
 Per-provider deviations are in [COMPATIBILITY.md](COMPATIBILITY.md). The intentional
-differences there (added `x-llmgateway-*` headers, request-body buffering, no retries,
+differences there (added `x-zibbo-*` headers, request-body buffering, no retries,
 the mid-stream error frame) apply to every provider.

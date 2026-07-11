@@ -200,8 +200,8 @@ async def test_optimization_headers_are_reported(client: AsyncClient) -> None:
     response = await client.post(
         f"{PREFIX}/messages", json=_message(NOISY_HTML), headers={"x-api-key": "k"}
     )
-    assert response.headers["x-llmgateway-optimization"] == "applied"
-    assert int(response.headers["x-llmgateway-tokens-saved"]) > 0
+    assert response.headers["x-zibbo-optimization"] == "applied"
+    assert int(response.headers["x-zibbo-tokens-saved"]) > 0
 
 
 async def test_a_clean_message_crosses_untouched(

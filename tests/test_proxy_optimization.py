@@ -163,14 +163,14 @@ async def test_embeddings_are_not_optimized(
 async def test_optimization_headers_report_the_saving(client: AsyncClient) -> None:
     response = await client.post("/v1/chat/completions", json=_chat(NOISY_HTML))
 
-    assert response.headers["x-llmgateway-optimization"] == "applied"
-    assert int(response.headers["x-llmgateway-tokens-saved"]) > 0
+    assert response.headers["x-zibbo-optimization"] == "applied"
+    assert int(response.headers["x-zibbo-tokens-saved"]) > 0
 
 
 async def test_skipped_requests_say_why(client: AsyncClient) -> None:
     response = await client.post("/v1/chat/completions", json=_chat("Say hello."))
 
-    assert response.headers["x-llmgateway-optimization"] == "skipped:content_already_optimal"
+    assert response.headers["x-zibbo-optimization"] == "skipped:content_already_optimal"
 
 
 async def test_denied_endpoints_say_why(client: AsyncClient) -> None:
@@ -178,7 +178,7 @@ async def test_denied_endpoints_say_why(client: AsyncClient) -> None:
         "/v1/embeddings", content=b"{}", headers={"Content-Type": "application/json"}
     )
 
-    assert response.headers["x-llmgateway-optimization"] == "skipped:endpoint_not_eligible"
+    assert response.headers["x-zibbo-optimization"] == "skipped:endpoint_not_eligible"
 
 
 # -- Behaviour under configuration -----------------------------------------

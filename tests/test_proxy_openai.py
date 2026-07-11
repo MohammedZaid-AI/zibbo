@@ -307,13 +307,13 @@ async def test_upstream_request_id_wins_over_the_gateways(client: AsyncClient) -
     response = await client.post("/v1/chat/completions", json=CHAT_REQUEST, headers=_auth())
 
     assert response.headers["x-request-id"] == "upstream-req-9f8e7d"
-    assert response.headers["x-llmgateway-request-id"].startswith("req_")
+    assert response.headers["x-zibbo-request-id"].startswith("req_")
 
 
 async def test_gateway_request_id_is_present_on_non_proxied_routes(client: AsyncClient) -> None:
     response = await client.get("/health/live")
 
-    assert response.headers["x-request-id"] == response.headers["x-llmgateway-request-id"]
+    assert response.headers["x-request-id"] == response.headers["x-zibbo-request-id"]
 
 
 async def test_content_length_is_recomputed_not_relayed(client: AsyncClient) -> None:

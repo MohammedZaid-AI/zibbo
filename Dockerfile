@@ -38,8 +38,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
     TIKTOKEN_CACHE_DIR=/opt/tiktoken \
-    LLMGATEWAY_HOST=0.0.0.0 \
-    LLMGATEWAY_PORT=8000
+    ZIBBO_HOST=0.0.0.0 \
+    ZIBBO_PORT=8000
 
 # libxml2/libxslt runtime libraries for lxml's C extension.
 RUN apt-get update \

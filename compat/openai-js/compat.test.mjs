@@ -1,5 +1,5 @@
 /**
- * Drives the official OpenAI JavaScript SDK against LLMGateway.
+ * Drives the official OpenAI JavaScript SDK against Zibbo.
  *
  * The Python SDK suite (tests/test_openai_sdk_compat.py) proves the wire format is
  * right for one client. It cannot prove it for a different one: the JS SDK has its
@@ -9,7 +9,7 @@
  * promise of the product, asserted from the outside.
  *
  *   uvicorn benchmarks.upstream:app --port 8124 --no-access-log
- *   LLMGATEWAY_OPENAI_BASE_URL=http://127.0.0.1:8124/v1 uvicorn gateway.main:app --port 8123
+ *   ZIBBO_OPENAI_BASE_URL=http://127.0.0.1:8124/v1 uvicorn gateway.main:app --port 8123
  *   npm install && npm test
  */
 
@@ -111,22 +111,22 @@ await check("provider request id is exposed, not the gateway's", async () => {
     .create({ model: "gpt-4o-mini", messages: MESSAGES })
     .withResponse();
   assert.equal(response.headers.get("x-request-id"), "upstream-bench");
-  assert.match(response.headers.get("x-llmgateway-request-id"), /^req_/);
+  assert.match(response.headers.get("x-zibbo-request-id"), /^req_/);
 });
 
 await check("optimization happens and is reported in headers", async () => {
   const { response } = await client.chat.completions
     .create({ model: "gpt-4o-mini", messages: [{ role: "user", content: NOISY_HTML }] })
     .withResponse();
-  assert.equal(response.headers.get("x-llmgateway-optimization"), "applied");
-  assert.ok(Number(response.headers.get("x-llmgateway-tokens-saved")) > 0);
+  assert.equal(response.headers.get("x-zibbo-optimization"), "applied");
+  assert.ok(Number(response.headers.get("x-zibbo-tokens-saved")) > 0);
 });
 
 await check("an already-clean request is not optimized", async () => {
   const { response } = await client.chat.completions
     .create({ model: "gpt-4o-mini", messages: MESSAGES })
     .withResponse();
-  assert.match(response.headers.get("x-llmgateway-optimization"), /^skipped:/);
+  assert.match(response.headers.get("x-zibbo-optimization"), /^skipped:/);
 });
 
 await check("a raw fetch against the gateway works (no SDK)", async () => {

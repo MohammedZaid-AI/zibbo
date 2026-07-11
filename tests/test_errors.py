@@ -1,6 +1,6 @@
 """The error envelope.
 
-Callers switch to LLMGateway by changing one URL. If our failures don't look
+Callers switch to Zibbo by changing one URL. If our failures don't look
 like the provider's failures, their error handling silently stops working — so
 the envelope shape is part of the public contract and is pinned here.
 """

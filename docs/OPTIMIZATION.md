@@ -109,7 +109,7 @@ Noise-class matching is anchored on `-`, `_` and space, so `ad` never matches
 
 **Links and images are kept by default.** A URL is content. Dropping it saves tokens
 by destroying information, which is the one thing this pipeline promises never to do.
-Set `LLMGATEWAY_HTML_PRESERVE_LINKS=false` if you disagree. `data:` URIs are the sole
+Set `ZIBBO_HTML_PRESERVE_LINKS=false` if you disagree. `data:` URIs are the sole
 exception: they are payload, not reference, and can be megabytes of base64. The `alt`
 text survives.
 
@@ -125,7 +125,7 @@ counts duplicates as it parses so the collapse is reported instead of silent. Ev
 JSON parser downstream would resolve the ambiguity the same way.
 
 **Empty containers are kept by default.** `{"tools": []}` tells an API "no tools",
-which is not what `{}` says. `LLMGATEWAY_JSON_REMOVE_EMPTY_CONTAINERS=true` opts in.
+which is not what `{}` says. `ZIBBO_JSON_REMOVE_EMPTY_CONTAINERS=true` opts in.
 
 ### Plain text
 
@@ -134,7 +134,7 @@ one, and removes a paragraph identical to the one immediately before it. Consecu
 only — a phrase recurring later in a document is content, not boilerplate.
 
 **Runs of spaces inside a line are not collapsed by default.** Indentation is meaning
-in code; alignment is meaning in Markdown tables. `LLMGATEWAY_TEXT_COLLAPSE_INLINE_WHITESPACE=true`
+in code; alignment is meaning in Markdown tables. `ZIBBO_TEXT_COLLAPSE_INLINE_WHITESPACE=true`
 enables it for deployments that know their content is prose.
 
 ## Policy
@@ -147,14 +147,14 @@ enables it for deployments that know their content is prose.
 | | `embeddings`, `moderations` |
 
 Only `POST`, only `application/json`, only bodies under
-`LLMGATEWAY_OPTIMIZATION_MAX_BODY_BYTES` (8 MB).
+`ZIBBO_OPTIMIZATION_MAX_BODY_BYTES` (8 MB).
 
 The endpoint rule is an **allowlist that never abstains**. An endpoint OpenAI ships
 tomorrow is proxied but not optimized until someone allows it explicitly. Getting
 this backwards means silently corrupting a fine-tuning upload.
 
 Rules are evaluated in order and the first to decide wins, so the kill switch
-(`LLMGATEWAY_OPTIMIZATION_ENABLED=false`) precedes everything. Adding a rule — per
+(`ZIBBO_OPTIMIZATION_ENABLED=false`) precedes everything. Adding a rule — per
 tenant, per model, per size — is one class.
 
 ## Optimization never costs more than it saves
@@ -181,9 +181,9 @@ Every response says what happened:
 
 | Header | Meaning |
 |---|---|
-| `x-llmgateway-optimization: applied` | The body was rewritten |
-| `x-llmgateway-optimization: skipped:<reason>` | Why it was not |
-| `x-llmgateway-tokens-saved: 110` | Tokens removed, when applied |
+| `x-zibbo-optimization: applied` | The body was rewritten |
+| `x-zibbo-optimization: skipped:<reason>` | Why it was not |
+| `x-zibbo-tokens-saved: 110` | Tokens removed, when applied |
 
 ## Performance
 
@@ -191,7 +191,7 @@ The body is parsed once. The detector's JSON parse is carried on the `Detection`
 reused by the JSON transformer rather than repeated. Segments hold a direct reference
 to their container, so writing a result back is an assignment, not a second tree walk.
 
-Above `LLMGATEWAY_OPTIMIZATION_OFFLOAD_THRESHOLD_BYTES` (128 KB) the work moves to a
+Above `ZIBBO_OPTIMIZATION_OFFLOAD_THRESHOLD_BYTES` (128 KB) the work moves to a
 worker thread. Parsing a multi-megabyte HTML document is tens of milliseconds of pure
 CPU, and holding the event loop stalls every other in-flight request, including
 active streams.

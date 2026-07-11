@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "llmgateway"
+name = "zibbo"
 version = "0.1.0"
 description = "AI gateway and deterministic content-optimization proxy for LLM providers."
 readme = "README.md"
@@ -30,7 +30,7 @@ dependencies = [
     "python-docx>=1.1.0",
     # Shared transformation cache. Imported lazily inside the Redis backend, which
     # degrades to "always miss" if the server is unreachable — so this is only needed
-    # when LLMGATEWAY_CACHE_BACKEND=redis, and its absence never breaks startup.
+    # when ZIBBO_CACHE_BACKEND=redis, and its absence never breaks startup.
     "redis>=5.0.0",
 ]
 

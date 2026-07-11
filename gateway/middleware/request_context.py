@@ -29,11 +29,11 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 REQUEST_ID_HEADER: Final = "x-request-id"
-GATEWAY_REQUEST_ID_HEADER: Final = "x-llmgateway-request-id"
+GATEWAY_REQUEST_ID_HEADER: Final = "x-zibbo-request-id"
 PROCESS_TIME_HEADER: Final = "x-process-time"
-OPTIMIZATION_HEADER: Final = "x-llmgateway-optimization"
-TOKENS_SAVED_HEADER: Final = "x-llmgateway-tokens-saved"
-CACHE_HEADER: Final = "x-llmgateway-cache"
+OPTIMIZATION_HEADER: Final = "x-zibbo-optimization"
+TOKENS_SAVED_HEADER: Final = "x-zibbo-tokens-saved"
+CACHE_HEADER: Final = "x-zibbo-cache"
 
 _request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 

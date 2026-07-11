@@ -17,7 +17,7 @@ from gateway.main import create_app
 
 
 def build_settings(**overrides: object) -> Settings:
-    """A Settings instance isolated from ``.env`` and from ``LLMGATEWAY_*`` vars."""
+    """A Settings instance isolated from ``.env`` and from ``ZIBBO_*`` vars."""
     defaults: dict[str, object] = {
         "environment": Environment.TEST,
         "debug": False,

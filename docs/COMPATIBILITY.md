@@ -1,6 +1,6 @@
 # API compatibility
 
-LLMGateway aims to be indistinguishable from the upstream provider to any client
+Zibbo aims to be indistinguishable from the upstream provider to any client
 that changes only its `base_url`. This document records every place where it is
 *not*, and why. It is written around OpenAI because that is the reference SDK, but
 every difference here applies to **all** providers unless noted; provider-specific
@@ -106,7 +106,7 @@ SDK as the client, in `tests/test_openai_sdk_compat.py`.
 ### 1. `x-request-id` is the provider's; the gateway's id has its own header
 
 A proxied response carries **upstream's** `x-request-id`. The gateway's own
-correlation id is always in `x-llmgateway-request-id`.
+correlation id is always in `x-zibbo-request-id`.
 
 `openai.APIError.request_id` reads `x-request-id`, and that value is what OpenAI
 support asks for. Overwriting it would make every gateway user's support ticket
@@ -115,7 +115,7 @@ is the gateway's, since no upstream claimed it.
 
 ### 2. Two headers are added
 
-`x-llmgateway-request-id` on every response, and `x-process-time` (milliseconds to
+`x-zibbo-request-id` on every response, and `x-process-time` (milliseconds to
 response headers). Streaming responses also get `x-accel-buffering: no`, which stops
 nginx from buffering an SSE body and silently destroying incremental delivery.
 
@@ -191,7 +191,7 @@ This is the product. It is nevertheless a difference from the upstream API, and 
 has consequences worth stating plainly:
 
 * **The provider does not receive the bytes the caller sent** on those endpoints.
-  If a caller needs byte-exact prompt delivery, set `LLMGATEWAY_OPTIMIZATION_ENABLED=false`
+  If a caller needs byte-exact prompt delivery, set `ZIBBO_OPTIMIZATION_ENABLED=false`
   and the gateway reverts to the Phase 2 pure passthrough.
 * **A request whose content is already optimal crosses byte-for-byte.** Optimization
   only re-serializes the body when a segment actually changed.
@@ -206,8 +206,8 @@ has consequences worth stating plainly:
 * File uploads, audio, images, fine-tuning, batches, embeddings and moderations are
   **never** optimized.
 
-Two response headers are added: `x-llmgateway-optimization` (`applied` or
-`skipped:<reason>`) and `x-llmgateway-tokens-saved`.
+Two response headers are added: `x-zibbo-optimization` (`applied` or
+`skipped:<reason>`) and `x-zibbo-tokens-saved`.
 
 ### 12. Percent-encoded path segments, revisited
 
@@ -246,8 +246,8 @@ The provider therefore receives *extracted text*, not the original file.
 * On any failure — unsupported, encrypted, corrupt, or extraction that would not save
   tokens — the block is forwarded **exactly** as it arrived.
 * A provider with native document vision (Claude reading a PDF's layout and images)
-  no longer sees the raw document. Disable with `LLMGATEWAY_DOCUMENTS_ENABLED=false`,
-  or per-format with `LLMGATEWAY_DOCUMENTS_DISABLED_FORMATS=pdf`.
+  no longer sees the raw document. Disable with `ZIBBO_DOCUMENTS_ENABLED=false`,
+  or per-format with `ZIBBO_DOCUMENTS_DISABLED_FORMATS=pdf`.
 * Raw uploads to `/v1/files` are never touched.
 
 Full design and guarantees: [DOCUMENT_TRANSFORMERS.md](DOCUMENT_TRANSFORMERS.md).
@@ -262,12 +262,12 @@ things are worth stating:
 
 * **The provider is still called every time.** Only the gateway's pre-processing is
   reused; response bodies are never cached. Prompt caching at the provider is unaffected.
-* Each response carries `x-llmgateway-cache`: `hit`, `miss`, or `partial`. A hit means
+* Each response carries `x-zibbo-cache`: `hit`, `miss`, or `partial`. A hit means
   the forwarded body was assembled from cached transformation results.
 
 The cache stores only successful, deterministic transformation outputs — never a failed
 or partial extraction, never a provider response. Disable it with
-`LLMGATEWAY_CACHE_ENABLED=false`. Full design: [CACHE.md](CACHE.md).
+`ZIBBO_CACHE_ENABLED=false`. Full design: [CACHE.md](CACHE.md).
 
 ## Not yet implemented
 

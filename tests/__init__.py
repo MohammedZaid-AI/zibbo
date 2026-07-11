@@ -1,1 +1,1 @@
-"""Test suite for LLMGateway."""
+"""Test suite for Zibbo."""

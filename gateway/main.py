@@ -60,7 +60,7 @@ logger = get_logger(__name__)
 QUIET_PATHS = frozenset({"/health/live", "/health/ready"})
 
 DESCRIPTION = """\
-LLMGateway is a drop-in proxy for LLM providers. Point your SDK's `base_url` at
+Zibbo is a drop-in proxy for LLM providers. Point your SDK's `base_url` at
 this service and requests are deterministically optimized — structural noise
 stripped, content normalized to Markdown — before being forwarded upstream.
 
@@ -255,7 +255,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(settings)
 
     app = FastAPI(
-        title="LLMGateway",
+        title="Zibbo",
         description=DESCRIPTION,
         version=settings.app_version,
         root_path=settings.root_path,

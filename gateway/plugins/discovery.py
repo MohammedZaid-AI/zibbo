@@ -2,12 +2,12 @@
 
 Three sources, in descending precedence:
 
-1. **Explicit configuration** (``LLMGATEWAY_PLUGINS_LOAD``). An operator naming a
+1. **Explicit configuration** (``ZIBBO_PLUGINS_LOAD``). An operator naming a
    module wins over anything installed, which is what makes an override possible.
-2. **A local directory** (``LLMGATEWAY_PLUGINS_DIR``). For development, and for
+2. **A local directory** (``ZIBBO_PLUGINS_DIR``). For development, and for
    deployments that vendor plugins rather than package them.
-3. **Python entry points** in the ``llmgateway.transformers`` group. The normal
-   path: ``pip install llmgateway-transformer-csv`` and it is found.
+3. **Python entry points** in the ``zibbo.transformers`` group. The normal
+   path: ``pip install zibbo-transformer-csv`` and it is found.
 
 Discovery is **lazy**. A source yields a candidate carrying a *callable* that
 imports the plugin, never the plugin itself. Importing third-party code is exactly
@@ -76,8 +76,8 @@ class EntryPointSource(PluginSource):
     """Installed packages advertising themselves in ``pyproject.toml``.
 
     ```toml
-    [project.entry-points."llmgateway.transformers"]
-    csv = "llmgateway_transformer_csv:PLUGIN"
+    [project.entry-points."zibbo.transformers"]
+    csv = "zibbo_transformer_csv:PLUGIN"
     ```
     """
 
@@ -106,7 +106,7 @@ class DirectorySource(PluginSource):
     """``*.py`` files and packages under a directory.
 
     This executes arbitrary code from the filesystem, so it only runs when an
-    operator has explicitly set ``LLMGATEWAY_PLUGINS_DIR``. There is no default.
+    operator has explicitly set ``ZIBBO_PLUGINS_DIR``. There is no default.
     """
 
     name: ClassVar[str] = "directory"
@@ -139,7 +139,7 @@ class DirectorySource(PluginSource):
     @staticmethod
     def _loader(stem: str, module_path: Path) -> Callable[[], Any]:
         def load() -> Any:
-            module_name = f"llmgateway_plugin_{stem}"
+            module_name = f"zibbo_plugin_{stem}"
             spec = importlib.util.spec_from_file_location(module_name, module_path)
             if spec is None or spec.loader is None:
                 raise PluginLoadError(f"cannot import {module_path}")

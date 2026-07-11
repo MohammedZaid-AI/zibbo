@@ -6,7 +6,7 @@ gateway to the provider — and reports the difference.
     # terminal 1
     uvicorn benchmarks.upstream:app --port 8124 --no-access-log
     # terminal 2
-    LLMGATEWAY_OPENAI_BASE_URL=http://127.0.0.1:8124/v1 \
+    ZIBBO_OPENAI_BASE_URL=http://127.0.0.1:8124/v1 \
       uvicorn gateway.main:app --port 8123 --no-access-log
     # terminal 3
     python -m benchmarks.overhead --requests 2000 --concurrency 16

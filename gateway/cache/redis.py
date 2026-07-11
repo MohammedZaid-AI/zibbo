@@ -34,7 +34,7 @@ class RedisCacheBackend(CacheBackend):
         self,
         url: str,
         *,
-        prefix: str = "llmgateway:xform:",
+        prefix: str = "zibbo:xform:",
         socket_timeout: float = 0.5,
     ) -> None:
         self._url = url
