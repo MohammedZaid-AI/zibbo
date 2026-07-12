@@ -1,0 +1,44 @@
+{
+  "average_token_reduction_pct": 29.91,
+  "overall_token_reduction_pct": 41.16,
+  "average_transformation_ms": 0.837,
+  "cost_reduction_pct": 41.17,
+  "cache_hit_rate": 1.0,
+  "cost_saved_usd_per_run": 0.004548,
+  "top_transformers": [
+    {
+      "name": "stripped_trailing_whitespace",
+      "count": 4
+    },
+    {
+      "name": "minified_json",
+      "count": 3
+    },
+    {
+      "name": "converted_to_markdown",
+      "count": 2
+    },
+    {
+      "name": "removed_ads_and_banners",
+      "count": 2
+    },
+    {
+      "name": "removed_embedded_media",
+      "count": 2
+    }
+  ],
+  "most_improved_file_types": [
+    {
+      "content_type": "html",
+      "avg_token_reduction_pct": 75.19
+    },
+    {
+      "content_type": "json",
+      "avg_token_reduction_pct": 49.0
+    },
+    {
+      "content_type": "text",
+      "avg_token_reduction_pct": 0.34
+    }
+  ]
+}

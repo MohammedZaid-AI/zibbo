@@ -1,0 +1,34 @@
+[2024-05-01 09:14:22] ERROR django.request: Internal Server Error: /api/orders/
+
+Traceback (most recent call last):
+  File "/app/venv/lib/python3.11/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/app/venv/lib/python3.11/site-packages/django/core/handlers/base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "/app/orders/views.py", line 88, in create
+    order = Order.objects.create(**validated)
+  File "/app/orders/models.py", line 42, in save
+    self.total = self.compute_total()
+  File "/app/orders/models.py", line 51, in compute_total
+    return sum(line.price * line.qty for line in self.lines.all())
+TypeError: unsupported operand type(s) for *: 'NoneType' and 'int'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/app/venv/lib/python3.11/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/app/venv/lib/python3.11/site-packages/django/core/handlers/base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "/app/orders/views.py", line 88, in create
+    order = Order.objects.create(**validated)
+  File "/app/orders/models.py", line 42, in save
+    self.total = self.compute_total()
+  File "/app/orders/models.py", line 51, in compute_total
+    return sum(line.price * line.qty for line in self.lines.all())
+TypeError: unsupported operand type(s) for *: 'NoneType' and 'int'
+
+
+
+[2024-05-01 09:14:23] ERROR django.request: Internal Server Error: /api/orders/
+[2024-05-01 09:14:23] WARNING django.server: "POST /api/orders/ HTTP/1.1" 500 145

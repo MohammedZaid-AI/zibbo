@@ -117,6 +117,9 @@ class LogEvent(_Frozen):
     skip_reason: str | None
     content_types: list[str]
     transformers: list[str]
+    steps: list[str]
+    tokens_before: int
+    tokens_after: int
     tokens_saved: int
     cache_status: str | None
     execution_time_ms: float

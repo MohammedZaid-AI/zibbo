@@ -261,6 +261,92 @@ def render_logs(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# Friendly labels for the pipeline's internal step names. A step without an entry is
+# prettified generically (underscores to spaces, sentence case, with known acronyms).
+_STEP_LABELS = {
+    "removed_scripts": "Removed scripts",
+    "removed_styles": "Removed styles",
+    "removed_svg": "Removed SVG graphics",
+    "removed_embedded_media": "Removed embedded media",
+    "removed_navigation": "Removed navigation",
+    "removed_ads_and_banners": "Removed ads and cookie banners",
+    "removed_hidden_elements": "Removed hidden elements",
+    "converted_to_markdown": "Converted HTML to Markdown",
+    "preserved_document_title": "Preserved document title",
+    "dropped_data_uri_images": "Dropped data-URI images",
+    "minified_json": "Minified JSON",
+    "removed_empty_containers": "Removed empty containers",
+    "collapsed_duplicate_keys": "Collapsed duplicate keys",
+    "normalized_line_endings": "Normalized line endings",
+    "stripped_trailing_whitespace": "Stripped trailing whitespace",
+    "collapsed_blank_lines": "Collapsed blank lines",
+    "collapsed_inline_whitespace": "Collapsed duplicated whitespace",
+    "removed_duplicate_paragraphs": "Removed duplicated paragraphs",
+    "extracted_document": "Extracted document to Markdown",
+}
+_ACRONYMS = {
+    "html": "HTML",
+    "json": "JSON",
+    "csv": "CSV",
+    "xml": "XML",
+    "pdf": "PDF",
+    "docx": "DOCX",
+}
+
+
+def humanize_step(step: str) -> str:
+    if step in _STEP_LABELS:
+        return _STEP_LABELS[step]
+    if step.startswith("format_"):
+        fmt = step[len("format_") :]
+        return f"Extracted {_ACRONYMS.get(fmt, fmt.upper())}"
+    words = step.replace("_", " ").split()
+    if not words:
+        return step
+    rendered = [_ACRONYMS.get(word, word) for word in words]
+    first = rendered[0]
+    rendered[0] = first if first.isupper() else first.capitalize()
+    return " ".join(rendered)
+
+
+def render_explain(data: dict[str, Any]) -> str:
+    events = data.get("events", [])
+    if not events:
+        return "No requests optimized yet. Route your assistant through Zibbo, then try again."
+    event = events[0]
+    if not event["applied"]:
+        return (
+            "Last request\n\n"
+            f"  Endpoint:  {event['endpoint']}\n"
+            f"  Result:    not optimized ({event['skip_reason']})\n"
+            "  No transformations were applied to this request."
+        )
+    before, after = event["tokens_before"], event["tokens_after"]
+    saved = event["tokens_saved"]
+    pct = round(saved / before * 100, 1) if before else 0.0
+    kinds = ", ".join(k.upper() for k in event["content_types"]) or "text"
+    lines = [
+        "Last request",
+        "",
+        f"  Content type:      {kinds}",
+        f"  Original tokens:   {before:,}",
+        f"  Optimized tokens:  {after:,}",
+        f"  Saved:             {saved:,} ({pct}%)",
+        "",
+        "  Transformations applied:",
+    ]
+    lines.extend(f"    {_TICK} {humanize_step(step)}" for step in event["steps"])
+    if not event["steps"]:
+        lines.append("    (none — content was already optimal)")
+    cache = (event["cache_status"] or "n/a").upper()
+    lines += [
+        "",
+        f"  Cache:             {cache}",
+        f"  Transformation:    {event['execution_time_ms']} ms",
+    ]
+    return "\n".join(lines)
+
+
 def _flag(ok: bool, label: str) -> str:
     return f"  {_TICK if ok else _CROSS} {label}"
 
@@ -298,6 +384,8 @@ def _cmd_doctor(client: Client, _args: argparse.Namespace) -> int:
 
 
 def _cmd_benchmark(client: Client, args: argparse.Namespace) -> int:
+    if args.suite:
+        return _run_suite(args)
     content: str | None = args.content
     if args.file:
         with open(args.file, encoding="utf-8", errors="replace") as handle:
@@ -309,6 +397,33 @@ def _cmd_benchmark(client: Client, args: argparse.Namespace) -> int:
         body["model"] = args.model
     print(render_benchmark(client.post("/internal/benchmark", body)))
     return 0
+
+
+def _run_suite(args: argparse.Namespace) -> int:
+    """Delegate to the offline benchmark suite (needs the repo + gateway installed).
+
+    The suite runs the real pipeline in-process and writes reports; it is heavier than
+    this stdlib CLI, so it lives in ``benchmarks.coding`` and is invoked as a subprocess
+    rather than imported here. Absent (installed without the repo) -> a clear hint.
+    """
+    import subprocess
+
+    command = [sys.executable, "-m", "benchmarks.coding"]
+    if args.provider:
+        command += ["--provider", args.provider]
+    if args.project:
+        command += ["--project", args.project]
+    if args.print_report:
+        command.append("--print")
+    try:
+        return subprocess.run(command, check=False).returncode  # noqa: S603 — fixed argv
+    except FileNotFoundError:
+        print(
+            "The benchmark suite runs from the Zibbo repository "
+            "(python -m benchmarks.coding). Clone it and run there.",
+            file=sys.stderr,
+        )
+        return 2
 
 
 def _cmd_enable(client: Client, _args: argparse.Namespace) -> int:
@@ -325,6 +440,11 @@ def _cmd_disable(client: Client, _args: argparse.Namespace) -> int:
 
 def _cmd_logs(client: Client, args: argparse.Namespace) -> int:
     print(render_logs(client.get(f"/internal/logs?limit={args.limit}")))
+    return 0
+
+
+def _cmd_explain(client: Client, _args: argparse.Namespace) -> int:
+    print(render_explain(client.get("/internal/logs?limit=1")))
     return 0
 
 
@@ -390,6 +510,7 @@ _COMMANDS = {
     "enable": _cmd_enable,
     "disable": _cmd_disable,
     "logs": _cmd_logs,
+    "explain": _cmd_explain,
     "version": _cmd_version,
     "start": _cmd_start,
 }
@@ -414,9 +535,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bench.add_argument("--file", help="read the sample from a file instead")
     bench.add_argument("--model", help="tokenizer model to count against")
+    bench.add_argument(
+        "--suite", action="store_true", help="run the full offline benchmark suite + reports"
+    )
+    bench.add_argument("--provider", help="suite: provider to price/count against")
+    bench.add_argument("--project", help="suite: limit to one project")
+    bench.add_argument(
+        "--print-report", action="store_true", help="suite: echo the markdown report"
+    )
 
     logs = sub.add_parser("logs", help="recent optimization activity (metadata only)")
     logs.add_argument("--limit", type=int, default=20)
+
+    sub.add_parser("explain", help="explain why the last request's tokens were reduced")
 
     start = sub.add_parser("start", help="start the gateway if it is not already running")
     start.add_argument("--port", type=int, help="port to start on (sets ZIBBO_PORT)")

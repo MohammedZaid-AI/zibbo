@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Fetching: getServerSideProps — Next.js</title>
+  <style>
+    :root { --bg: #fff; --fg: #111; }
+    body { margin: 0; font-family: system-ui, sans-serif; color: var(--fg); }
+    .sidebar { position: fixed; width: 260px; height: 100vh; overflow-y: auto; border-right: 1px solid #eee; }
+    .content { margin-left: 280px; max-width: 720px; padding: 32px; }
+    pre { background: #f6f8fa; padding: 12px; border-radius: 6px; overflow-x: auto; }
+    .cookie { position: fixed; bottom: 0; width: 100%; background: #222; color: #fff; padding: 16px; }
+    .promo { border: 1px dashed #f90; padding: 12px; margin: 16px 0; }
+  </style>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-XXXXXXX');
+  </script>
+  <script src="https://analytics.example.com/track.js" async></script>
+</head>
+<body>
+  <nav class="sidebar" aria-label="Docs navigation">
+    <ul>
+      <li><a href="/docs/getting-started">Getting Started</a></li>
+      <li><a href="/docs/routing">Routing</a></li>
+      <li><a href="/docs/data-fetching">Data Fetching</a></li>
+      <li><a href="/docs/rendering">Rendering</a></li>
+      <li><a href="/docs/styling">Styling</a></li>
+      <li><a href="/docs/deployment">Deployment</a></li>
+    </ul>
+  </nav>
+
+  <div class="cookie" role="dialog">
+    We use cookies to analyze traffic. <button>Accept all</button> <button>Reject</button>
+  </div>
+
+  <main class="content">
+    <h1>getServerSideProps</h1>
+    <p>If you export a function called <code>getServerSideProps</code> (Server-Side Rendering)
+    from a page, Next.js will pre-render this page on each request using the data returned by
+    <code>getServerSideProps</code>.</p>
+
+    <div class="promo">
+      <strong>Deploy on the Example Cloud</strong> — the fastest way to ship Next.js. Sign up free.
+    </div>
+
+    <h2>When should I use getServerSideProps?</h2>
+    <p>You should use <code>getServerSideProps</code> only if you need to render a page whose
+    data must be fetched at request time. This could be due to the nature of the data or
+    properties of the request (such as <code>authorization</code> headers or geolocation).</p>
+
+    <h2>Example</h2>
+    <pre><code>export async function getServerSideProps(context) {
+  const res = await fetch(`https://api.example.com/data`)
+  const data = await res.json()
+  return { props: { data } }
+}</code></pre>
+
+    <h2>Caching with Server-Side Rendering</h2>
+    <p>You can use caching headers (<code>Cache-Control</code>) inside
+    <code>getServerSideProps</code> to cache dynamic responses. For example, using
+    <code>stale-while-revalidate</code>.</p>
+
+    <ul>
+      <li>The data is fetched on every request.</li>
+      <li>The result is not cached by default.</li>
+      <li>Use CDN caching headers to opt into caching.</li>
+    </ul>
+  </main>
+
+  <script>
+    document.querySelectorAll('.cookie button').forEach(b => b.addEventListener('click', () => {
+      document.querySelector('.cookie').remove();
+    }));
+  </script>
+</body>
+</html>

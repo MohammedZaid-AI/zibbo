@@ -156,6 +156,47 @@ def test_render_logs_is_metadata_only() -> None:
     assert "cache=hit" in out
 
 
+def test_render_explain_humanizes_steps() -> None:
+    out = cli.render_explain(
+        {
+            "events": [
+                {
+                    "applied": True,
+                    "endpoint": "messages",
+                    "content_types": ["html"],
+                    "transformers": ["html"],
+                    "steps": [
+                        "removed_scripts",
+                        "removed_ads_and_banners",
+                        "converted_to_markdown",
+                    ],
+                    "tokens_before": 52183,
+                    "tokens_after": 18924,
+                    "tokens_saved": 33259,
+                    "cache_status": "miss",
+                    "execution_time_ms": 3.1,
+                    "skip_reason": None,
+                }
+            ]
+        }
+    )
+    assert "52,183" in out
+    assert "63.7%" in out
+    assert "Removed scripts" in out
+    assert "Converted HTML to Markdown" in out
+    assert "MISS" in out
+
+
+def test_render_explain_with_no_history() -> None:
+    assert "No requests optimized yet" in cli.render_explain({"events": []})
+
+
+def test_humanize_step_generic_and_special() -> None:
+    assert cli.humanize_step("minified_json") == "Minified JSON"
+    assert cli.humanize_step("format_pdf") == "Extracted PDF"
+    assert cli.humanize_step("collapsed_blank_lines") == "Collapsed blank lines"
+
+
 def test_discover_prefers_explicit_then_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cli.discover("http://host:9000", None).base_url == "http://host:9000"
 
@@ -165,7 +206,17 @@ def test_discover_prefers_explicit_then_env(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_parser_accepts_every_subcommand() -> None:
     parser = cli.build_parser()
-    for command in ("status", "stats", "doctor", "enable", "disable", "logs", "version", "start"):
+    for command in (
+        "status",
+        "stats",
+        "doctor",
+        "enable",
+        "disable",
+        "logs",
+        "explain",
+        "version",
+        "start",
+    ):
         assert parser.parse_args([command]).command == command
     args = parser.parse_args(["benchmark", "--content", "hi", "--model", "gpt-4o"])
     assert args.content == "hi"

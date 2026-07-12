@@ -1,0 +1,282 @@
+{
+  "schema": 1,
+  "tokenizer_exact": false,
+  "measured_with": {
+    "provider": "openai",
+    "model": "gpt-4o"
+  },
+  "totals": {
+    "cases": 10,
+    "cases_helped": 10,
+    "original_tokens": 4419,
+    "optimized_tokens": 2600,
+    "tokens_saved": 1819,
+    "original_bytes": 15898,
+    "optimized_bytes": 8859,
+    "overall_token_reduction_pct": 41.16,
+    "avg_token_reduction_pct": 29.91,
+    "cache_hit_rate": 1.0
+  },
+  "cost_by_provider": [
+    {
+      "key": "openai",
+      "label": "OpenAI GPT-4o",
+      "model": "gpt-4o",
+      "usd_per_million_input_tokens": 2.5,
+      "cost_before_usd": 0.011048,
+      "cost_after_usd": 0.0065,
+      "cost_saved_usd": 0.004548
+    },
+    {
+      "key": "anthropic",
+      "label": "Claude Sonnet",
+      "model": "claude-sonnet-4",
+      "usd_per_million_input_tokens": 3.0,
+      "cost_before_usd": 0.013257,
+      "cost_after_usd": 0.0078,
+      "cost_saved_usd": 0.005457
+    },
+    {
+      "key": "openai-mini",
+      "label": "OpenAI GPT-4o mini",
+      "model": "gpt-4o-mini",
+      "usd_per_million_input_tokens": 0.15,
+      "cost_before_usd": 0.000663,
+      "cost_after_usd": 0.00039,
+      "cost_saved_usd": 0.000273
+    }
+  ],
+  "file_types": [
+    {
+      "content_type": "html",
+      "cases": 2,
+      "avg_token_reduction_pct": 75.19
+    },
+    {
+      "content_type": "json",
+      "cases": 3,
+      "avg_token_reduction_pct": 49.0
+    },
+    {
+      "content_type": "text",
+      "cases": 5,
+      "avg_token_reduction_pct": 0.34
+    }
+  ],
+  "top_transformers": [
+    {
+      "name": "stripped_trailing_whitespace",
+      "count": 4
+    },
+    {
+      "name": "minified_json",
+      "count": 3
+    },
+    {
+      "name": "converted_to_markdown",
+      "count": 2
+    },
+    {
+      "name": "removed_ads_and_banners",
+      "count": 2
+    },
+    {
+      "name": "removed_embedded_media",
+      "count": 2
+    },
+    {
+      "name": "removed_navigation",
+      "count": 2
+    },
+    {
+      "name": "removed_scripts",
+      "count": 2
+    },
+    {
+      "name": "removed_styles",
+      "count": 2
+    }
+  ],
+  "cases": [
+    {
+      "id": "django-error-log-explain",
+      "project": "Django",
+      "scenario": "Explain an error log",
+      "content_type": "text",
+      "original_bytes": 1775,
+      "optimized_bytes": 1772,
+      "bytes_removed": 3,
+      "original_tokens": 572,
+      "optimized_tokens": 571,
+      "tokens_saved": 1,
+      "token_reduction_pct": 0.17,
+      "cache_hit": true,
+      "transformers": [
+        "collapsed_blank_lines"
+      ]
+    },
+    {
+      "id": "fastapi-openapi-architecture",
+      "project": "FastAPI",
+      "scenario": "Analyze architecture",
+      "content_type": "json",
+      "original_bytes": 4335,
+      "optimized_bytes": 1470,
+      "bytes_removed": 2865,
+      "original_tokens": 833,
+      "optimized_tokens": 372,
+      "tokens_saved": 461,
+      "token_reduction_pct": 55.34,
+      "cache_hit": true,
+      "transformers": [
+        "minified_json"
+      ]
+    },
+    {
+      "id": "fastapi-readme-understand",
+      "project": "FastAPI",
+      "scenario": "Understand a large README",
+      "content_type": "text",
+      "original_bytes": 649,
+      "optimized_bytes": 648,
+      "bytes_removed": 1,
+      "original_tokens": 200,
+      "optimized_tokens": 199,
+      "tokens_saved": 1,
+      "token_reduction_pct": 0.5,
+      "cache_hit": true,
+      "transformers": [
+        "stripped_trailing_whitespace"
+      ]
+    },
+    {
+      "id": "go-service-refactor",
+      "project": "Go",
+      "scenario": "Refactor this module",
+      "content_type": "text",
+      "original_bytes": 1086,
+      "optimized_bytes": 1085,
+      "bytes_removed": 1,
+      "original_tokens": 343,
+      "optimized_tokens": 342,
+      "tokens_saved": 1,
+      "token_reduction_pct": 0.29,
+      "cache_hit": true,
+      "transformers": [
+        "stripped_trailing_whitespace"
+      ]
+    },
+    {
+      "id": "nextjs-docs-explain",
+      "project": "Next.js",
+      "scenario": "Explain this project",
+      "content_type": "html",
+      "original_bytes": 3223,
+      "optimized_bytes": 998,
+      "bytes_removed": 2225,
+      "original_tokens": 1030,
+      "optimized_tokens": 267,
+      "tokens_saved": 763,
+      "token_reduction_pct": 74.08,
+      "cache_hit": true,
+      "transformers": [
+        "removed_ads_and_banners",
+        "removed_embedded_media",
+        "removed_navigation",
+        "removed_scripts",
+        "removed_styles",
+        "converted_to_markdown"
+      ]
+    },
+    {
+      "id": "nextjs-release-notes-docs",
+      "project": "Next.js",
+      "scenario": "Generate documentation",
+      "content_type": "html",
+      "original_bytes": 1548,
+      "optimized_bytes": 449,
+      "bytes_removed": 1099,
+      "original_tokens": 536,
+      "optimized_tokens": 127,
+      "tokens_saved": 409,
+      "token_reduction_pct": 76.31,
+      "cache_hit": true,
+      "transformers": [
+        "removed_ads_and_banners",
+        "removed_embedded_media",
+        "removed_navigation",
+        "removed_scripts",
+        "removed_styles",
+        "converted_to_markdown"
+      ]
+    },
+    {
+      "id": "node-api-response-review",
+      "project": "Node.js",
+      "scenario": "Review a pull request",
+      "content_type": "json",
+      "original_bytes": 1138,
+      "optimized_bytes": 447,
+      "bytes_removed": 691,
+      "original_tokens": 262,
+      "optimized_tokens": 128,
+      "tokens_saved": 134,
+      "token_reduction_pct": 51.15,
+      "cache_hit": true,
+      "transformers": [
+        "minified_json"
+      ]
+    },
+    {
+      "id": "react-component-review",
+      "project": "React",
+      "scenario": "Review this file",
+      "content_type": "text",
+      "original_bytes": 888,
+      "optimized_bytes": 887,
+      "bytes_removed": 1,
+      "original_tokens": 270,
+      "optimized_tokens": 269,
+      "tokens_saved": 1,
+      "token_reduction_pct": 0.37,
+      "cache_hit": true,
+      "transformers": [
+        "stripped_trailing_whitespace"
+      ]
+    },
+    {
+      "id": "rust-module-duplicate-logic",
+      "project": "Rust",
+      "scenario": "Find duplicate logic",
+      "content_type": "text",
+      "original_bytes": 835,
+      "optimized_bytes": 834,
+      "bytes_removed": 1,
+      "original_tokens": 257,
+      "optimized_tokens": 256,
+      "tokens_saved": 1,
+      "token_reduction_pct": 0.39,
+      "cache_hit": true,
+      "transformers": [
+        "stripped_trailing_whitespace"
+      ]
+    },
+    {
+      "id": "typescript-tsconfig-architecture",
+      "project": "TypeScript",
+      "scenario": "Analyze architecture",
+      "content_type": "json",
+      "original_bytes": 421,
+      "optimized_bytes": 269,
+      "bytes_removed": 152,
+      "original_tokens": 116,
+      "optimized_tokens": 69,
+      "tokens_saved": 47,
+      "token_reduction_pct": 40.52,
+      "cache_hit": true,
+      "transformers": [
+        "minified_json"
+      ]
+    }
+  ]
+}

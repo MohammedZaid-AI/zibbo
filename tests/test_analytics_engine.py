@@ -118,7 +118,7 @@ def test_event_from_report_is_metadata_only() -> None:
     result = TransformationResult(
         transformation_name="html",
         detected_content_type=ContentType.HTML,
-        transformed_content="markdown",
+        transformed_content="DISTINCTIVE_PROMPT_BODY",
         original_size_bytes=400,
         transformed_size_bytes=120,
         original_token_count=100,
@@ -140,11 +140,12 @@ def test_event_from_report_is_metadata_only() -> None:
     assert event.tokens_before == 100
     assert event.tokens_after == 30
     assert event.tokens_saved == 70
+    assert event.steps == ("converted_to_markdown",)  # steps carried for `zibbo explain`
     assert event.cache_hits == 1
     assert event.cache_lookups == 1
     assert event.cache_status == "hit"
-    # No attribute could carry content.
-    assert "markdown" not in repr(event)
+    # The transformed content never enters the event — only metadata does.
+    assert "DISTINCTIVE_PROMPT_BODY" not in repr(event)
 
 
 def test_skipped_report_records_a_skip() -> None:

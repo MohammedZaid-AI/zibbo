@@ -1,0 +1,48 @@
+{
+    "data": {
+        "user": {
+            "id": "u_10023",
+            "name": "Ada Lovelace",
+            "email": "ada@example.com",
+            "roles": [
+                "admin",
+                "engineer"
+            ],
+            "preferences": {
+                "theme": "dark",
+                "notifications": {
+                    "email": true,
+                    "push": false,
+                    "sms": false
+                }
+            }
+        },
+        "projects": [
+            {
+                "id": "p_1",
+                "name": "gateway",
+                "stars": 128,
+                "private": false,
+                "tags": [
+                    "python",
+                    "proxy"
+                ]
+            },
+            {
+                "id": "p_2",
+                "name": "dashboard",
+                "stars": 42,
+                "private": true,
+                "tags": [
+                    "typescript",
+                    "next"
+                ]
+            }
+        ]
+    },
+    "meta": {
+        "requestId": "req_abc123",
+        "durationMs": 42,
+        "cached": false
+    }
+}

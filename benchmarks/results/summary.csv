@@ -1,0 +1,11 @@
+id,project,scenario,content_type,original_tokens,optimized_tokens,token_reduction_pct,bytes_removed,cache_hit,transformers
+django-error-log-explain,Django,Explain an error log,text,572,571,0.17,3,hit,collapsed_blank_lines
+fastapi-openapi-architecture,FastAPI,Analyze architecture,json,833,372,55.34,2865,hit,minified_json
+fastapi-readme-understand,FastAPI,Understand a large README,text,200,199,0.5,1,hit,stripped_trailing_whitespace
+go-service-refactor,Go,Refactor this module,text,343,342,0.29,1,hit,stripped_trailing_whitespace
+nextjs-docs-explain,Next.js,Explain this project,html,1030,267,74.08,2225,hit,removed_ads_and_banners removed_embedded_media removed_navigation removed_scripts removed_styles converted_to_markdown
+nextjs-release-notes-docs,Next.js,Generate documentation,html,536,127,76.31,1099,hit,removed_ads_and_banners removed_embedded_media removed_navigation removed_scripts removed_styles converted_to_markdown
+node-api-response-review,Node.js,Review a pull request,json,262,128,51.15,691,hit,minified_json
+react-component-review,React,Review this file,text,270,269,0.37,1,hit,stripped_trailing_whitespace
+rust-module-duplicate-logic,Rust,Find duplicate logic,text,257,256,0.39,1,hit,stripped_trailing_whitespace
+typescript-tsconfig-architecture,TypeScript,Analyze architecture,json,116,69,40.52,152,hit,minified_json

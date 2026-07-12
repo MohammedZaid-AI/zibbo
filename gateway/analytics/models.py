@@ -35,6 +35,10 @@ class OptimizationEvent:
     cache_hits: int
     cache_lookups: int
     execution_time_ms: float
+    steps: tuple[str, ...] = ()
+    """The individual transformation steps applied, e.g. ``removed_scripts``,
+    ``converted_to_markdown`` — the detail behind ``zibbo explain``. Metadata, never
+    content. Defaulted so older call sites and tests stay valid."""
 
     @property
     def tokens_saved(self) -> int:

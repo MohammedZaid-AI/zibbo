@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "note": "Representative requests an AI coding assistant sends. Not live repo clones; curated samples chosen to span content types and to include cases where Zibbo helps little. See docs/BENCHMARKS.md.",
+  "cases": [
+    {
+      "id": "fastapi-openapi-architecture",
+      "project": "FastAPI",
+      "scenario": "Analyze architecture",
+      "file": "fastapi/openapi.json",
+      "media_type": "application/json",
+      "description": "A pretty-printed OpenAPI schema pasted in to explain the API surface."
+    },
+    {
+      "id": "fastapi-readme-understand",
+      "project": "FastAPI",
+      "scenario": "Understand a large README",
+      "file": "fastapi/readme.md",
+      "media_type": "text/markdown",
+      "description": "A project README, already clean Markdown — a deliberate low-benefit case."
+    },
+    {
+      "id": "nextjs-docs-explain",
+      "project": "Next.js",
+      "scenario": "Explain this project",
+      "file": "nextjs/docs-page.html",
+      "media_type": "text/html",
+      "description": "A documentation page saved as HTML, with nav, scripts, styles and a cookie banner."
+    },
+    {
+      "id": "nextjs-release-notes-docs",
+      "project": "Next.js",
+      "scenario": "Generate documentation",
+      "file": "nextjs/release-notes.html",
+      "media_type": "text/html",
+      "description": "An HTML release-notes page with chrome around the actual notes."
+    },
+    {
+      "id": "react-component-review",
+      "project": "React",
+      "scenario": "Review this file",
+      "file": "react/UserCard.tsx",
+      "media_type": "text/plain",
+      "description": "A TypeScript React component — pure source, a deliberate near-zero-benefit case."
+    },
+    {
+      "id": "typescript-tsconfig-architecture",
+      "project": "TypeScript",
+      "scenario": "Analyze architecture",
+      "file": "typescript/tsconfig.json",
+      "media_type": "application/json",
+      "description": "A small config file — a deliberate low-benefit case (tiny JSON)."
+    },
+    {
+      "id": "django-error-log-explain",
+      "project": "Django",
+      "scenario": "Explain an error log",
+      "file": "django/error-log.txt",
+      "media_type": "text/plain",
+      "description": "A server traceback log with repeated frames and trailing whitespace."
+    },
+    {
+      "id": "go-service-refactor",
+      "project": "Go",
+      "scenario": "Refactor this module",
+      "file": "go/service.go",
+      "media_type": "text/plain",
+      "description": "A Go service file — pure source, a deliberate near-zero-benefit case."
+    },
+    {
+      "id": "rust-module-duplicate-logic",
+      "project": "Rust",
+      "scenario": "Find duplicate logic",
+      "file": "rust/handlers.rs",
+      "media_type": "text/plain",
+      "description": "A Rust handlers module — pure source, a deliberate near-zero-benefit case."
+    },
+    {
+      "id": "node-api-response-review",
+      "project": "Node.js",
+      "scenario": "Review a pull request",
+      "file": "node/api-response.json",
+      "media_type": "application/json",
+      "description": "A pretty-printed JSON API response captured for review."
+    }
+  ]
+}
