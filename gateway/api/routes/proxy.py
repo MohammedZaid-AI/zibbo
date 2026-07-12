@@ -21,13 +21,17 @@ import httpx
 import structlog
 from fastapi import APIRouter, Request, Response
 
+from gateway.analytics import event_from_report
 from gateway.api.deps import PipelineDep, ProviderRegistryDep, ProxyServiceDep
+from gateway.logging import get_logger
 from gateway.middleware.request_context import (
     CACHE_HEADER,
     OPTIMIZATION_HEADER,
     TOKENS_SAVED_HEADER,
 )
 from gateway.optimizers import TransformationReport, TransformationRequest
+
+logger = get_logger(__name__)
 
 PROXIED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
@@ -79,6 +83,7 @@ def create_proxy_router(*, provider_name: str, prefix: str) -> APIRouter:
             adapters=provider.adapters,
         )
         _bind_optimization_context(report)
+        _record_analytics(request, report, provider=provider.name, endpoint=upstream_path)
 
         # `.raw` rather than the mapping view: a client may send a header twice,
         # and collapsing the pair would change the request the provider sees.
@@ -107,6 +112,22 @@ def create_proxy_router(*, provider_name: str, prefix: str) -> APIRouter:
         return response
 
     return router
+
+
+def _record_analytics(
+    request: Request, report: TransformationReport, *, provider: str, endpoint: str
+) -> None:
+    """Fold this request's outcome into the analytics engine. Never breaks the request.
+
+    Metadata only — the event carries counts and names, never body content. Analytics
+    is an observation of the request, so its failure must not fail the request."""
+    engine = getattr(request.app.state, "analytics", None)
+    if engine is None:
+        return
+    try:
+        engine.record(event_from_report(report, provider=provider, endpoint=endpoint))
+    except Exception:  # noqa: BLE001 — analytics is best-effort, never load-bearing
+        logger.warning("analytics_record_failed")
 
 
 def _bind_optimization_context(report: TransformationReport) -> None:

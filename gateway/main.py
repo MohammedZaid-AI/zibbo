@@ -16,6 +16,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from gateway.analytics import AnalyticsEngine
 from gateway.api.router import api_router
 from gateway.api.routes.proxy import create_proxy_router
 from gateway.cache import build_transformation_cache
@@ -48,6 +49,7 @@ from gateway.providers import (
     ProviderRegistry,
     ProxyService,
 )
+from gateway.runtime import RuntimeControl
 from gateway.tokenizers import TokenCounterFactory
 
 if TYPE_CHECKING:
@@ -190,6 +192,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     plugin_report = plugins.attach(registry, detector)
     app.state.plugins = plugins
 
+    # The internal API's /status lists the active transformers; expose the registry it
+    # reads from. Kept on state rather than reached through the pipeline so the two do
+    # not have to grow a coupling for one read.
+    app.state.transformer_registry = registry
+
     document_service = build_document_service(settings)
     app.state.documents = document_service
 
@@ -267,6 +274,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
+    # Live runtime switches and the in-memory analytics engine. Created here, not in
+    # lifespan, because the per-provider policies built below close over the runtime
+    # control to read the optimization kill switch live. The analytics engine records
+    # every request's optimization outcome for the plugin's /internal/stats view.
+    app.state.runtime = RuntimeControl(optimization_enabled=settings.optimization_enabled)
+    app.state.analytics = AnalyticsEngine()
+
     # Providers are constructed here — synchronously, no I/O — so their route
     # prefixes are known before the app serves. The registry and per-provider
     # policies are read at request time; the pipeline they use is built in lifespan.
@@ -276,9 +290,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Per-provider optimization policy. The pipeline is shared and provider-agnostic;
     # what differs by provider — its eligible endpoints — is bound here and handed to
-    # the pipeline per request. Adapters travel on the provider itself.
+    # the pipeline per request. Adapters travel on the provider itself. The runtime
+    # control makes the enable/disable switch take effect without a restart.
     app.state.provider_policies = {
-        entry.provider.name: build_provider_policy(settings, entry.provider.endpoint_policy)
+        entry.provider.name: build_provider_policy(
+            settings, entry.provider.endpoint_policy, app.state.runtime
+        )
         for entry in mounted
     }
 

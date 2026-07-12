@@ -51,6 +51,11 @@ dev = [
     "hypothesis>=6.100.0",
 ]
 
+[project.scripts]
+# The terminal client the Claude Code / Codex plugins shell out to. Stdlib-only, so it
+# runs even before the gateway's own dependencies are on the path.
+zibbo = "gateway.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["gateway"]
 

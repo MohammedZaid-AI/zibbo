@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from gateway.cache import TransformationCache
     from gateway.config import Settings
     from gateway.documents import DocumentService
+    from gateway.runtime import RuntimeControl
     from gateway.tokenizers import TokenCounterFactory
 
 __all__ = [
@@ -103,6 +104,14 @@ def build_pipeline(
     )
 
 
-def build_provider_policy(settings: Settings, endpoint_policy: EndpointPolicy) -> PolicyEngine:
-    """The optimization policy for one provider: global rules plus its endpoints."""
-    return PolicyEngine.from_settings(settings, endpoint_policy)
+def build_provider_policy(
+    settings: Settings,
+    endpoint_policy: EndpointPolicy,
+    control: RuntimeControl | None = None,
+) -> PolicyEngine:
+    """The optimization policy for one provider: global rules plus its endpoints.
+
+    ``control`` makes the kill switch live: when supplied, the enable/disable state is
+    read from it per request instead of frozen from settings at startup.
+    """
+    return PolicyEngine.from_settings(settings, endpoint_policy, control)

@@ -30,7 +30,7 @@ import anyio.to_thread
 
 from gateway.cache import CachedTransformation
 from gateway.logging import get_logger
-from gateway.optimizers.extraction import DocumentSegment
+from gateway.optimizers.extraction import DocumentSegment, Segment
 from gateway.optimizers.models import (
     ContentType,
     SkipReason,
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from gateway.cache import TransformationCache
     from gateway.documents import DocumentFormat, DocumentService
     from gateway.optimizers.detector import ContentDetector
-    from gateway.optimizers.extraction import AdapterRegistry, Segment
+    from gateway.optimizers.extraction import AdapterRegistry
     from gateway.optimizers.models import TransformationRequest
     from gateway.optimizers.options import OptimizerOptions
     from gateway.optimizers.policy import PolicyEngine
@@ -119,6 +119,39 @@ class TransformationPipeline:
 
         self._log(report)
         return report
+
+    def preview(self, content: str, *, model: str | None = None) -> TransformationResult:
+        """Run one piece of text through the real transform path, no upstream call.
+
+        This is what ``/internal/benchmark`` uses: it exercises the same detection,
+        transformer selection, token counting and *cache* a request would, so the
+        numbers it reports are the numbers a request would have seen — but it forwards
+        nothing. A throwaway container stands in for the request body; the segment's
+        write-back lands there and is discarded.
+
+        Never gated by the enable/disable switch: a benchmark shows what optimization
+        *would* do, which is the whole point of running it while it is turned off.
+        """
+        counter = self._token_counters.for_model(model)
+        segment = Segment({"content": content}, "content", content, "benchmark")
+        result = self._transform_segment(segment, counter)
+        if result is not None:
+            return result
+        # No transformer applied (or below the size floor): a faithful no-op result.
+        tokens = counter.count(content)
+        size = len(content.encode("utf-8"))
+        return TransformationResult(
+            transformation_name="none",
+            detected_content_type=self._detector.detect(content).content_type,
+            transformed_content=content,
+            original_size_bytes=size,
+            transformed_size_bytes=size,
+            original_token_count=tokens,
+            transformed_token_count=tokens,
+            execution_time_ms=0.0,
+            transformations_applied=(),
+            origin="benchmark",
+        )
 
     # -- Synchronous core, safe to run in a worker thread ------------------
 

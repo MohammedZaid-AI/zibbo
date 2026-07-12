@@ -1,0 +1,20 @@
+{
+  "name": "zibbo",
+  "owner": {
+    "name": "Zibbo",
+    "url": "https://github.com/MohammedZaid-AI/zibbo"
+  },
+  "metadata": {
+    "description": "Zibbo — the deterministic token-optimization layer for AI coding assistants.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "zibbo",
+      "source": "./plugins/claude-code",
+      "description": "Status, stats, benchmarks and controls for your local Zibbo gateway, inside Claude Code.",
+      "version": "0.1.0",
+      "keywords": ["optimization", "tokens", "cache", "gateway", "proxy"]
+    }
+  ]
+}

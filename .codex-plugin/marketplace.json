@@ -1,0 +1,19 @@
+{
+  "name": "zibbo",
+  "owner": {
+    "name": "Zibbo",
+    "url": "https://github.com/MohammedZaid-AI/zibbo"
+  },
+  "metadata": {
+    "description": "Zibbo — the deterministic token-optimization layer for AI coding assistants.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "zibbo",
+      "source": "./plugins/codex",
+      "description": "Status, stats and controls for your local Zibbo gateway, inside Codex.",
+      "version": "0.1.0"
+    }
+  ]
+}

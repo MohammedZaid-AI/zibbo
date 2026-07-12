@@ -25,9 +25,10 @@ Nothing else changes.
 
 ## Status
 
-Phase 8 of 8. The gateway proxies OpenAI and Anthropic transparently, streaming
+Phase 9 of 9. The gateway proxies OpenAI and Anthropic transparently, streaming
 included, deterministically optimizes eligible request payloads and embedded documents,
-and caches those transformations so identical content is processed only once.
+caches those transformations so identical content is processed only once, and ships an
+editor plugin (Claude Code / Codex) and a `zibbo` CLI over a loopback control API.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -39,13 +40,15 @@ and caches those transformations so identical content is processed only once.
 | 6 | Multi-provider: OpenAI, Anthropic, Groq, Mistral, Ollama | done |
 | 7 | Document transformers: PDF, DOCX, CSV, XML, HTML | done |
 | 8 | Transformation cache: content-addressed, in-memory + Redis | done |
-| — | Token + cost analytics (Postgres) | next |
+| 9 | Editor integration: `zibbo` CLI, internal API, Claude Code + Codex plugins | done |
+| — | Token + cost analytics persistence (Postgres) | next |
 | — | Next.js dashboard | |
 
 Reference: [ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
 [PROVIDERS.md](docs/PROVIDERS.md) ·
 [DOCUMENT_TRANSFORMERS.md](docs/DOCUMENT_TRANSFORMERS.md) ·
 [CACHE.md](docs/CACHE.md) ·
+[PLUGIN_ARCHITECTURE.md](docs/PLUGIN_ARCHITECTURE.md) ·
 [EXTENDING.md](docs/EXTENDING.md) ·
 [PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md) ·
 [COMPATIBILITY.md](docs/COMPATIBILITY.md) ·
@@ -135,6 +138,25 @@ failed extraction. Each response says `x-zibbo-cache: hit|miss|partial`. See
 
 Set `ZIBBO_OPTIMIZATION_ENABLED=false` for a pure passthrough. Design and
 guarantees: [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md).
+
+## Inside Claude Code and Codex
+
+Zibbo ships an editor plugin and a `zibbo` CLI so the gateway lives where you code.
+
+```
+# Claude Code
+/plugin marketplace add MohammedZaid-AI/zibbo
+/plugin install zibbo@zibbo
+
+# then point the editor at the gateway (the plugin can't rewrite live traffic):
+export ANTHROPIC_BASE_URL=http://localhost:8000/anthropic
+```
+
+Inside Claude Code, `/zibbo`, `/zibbo stats`, `/zibbo doctor`, `/zibbo benchmark` show
+savings and controls without leaving the session; a session-start hook starts the gateway
+for you. From any shell, the same is `zibbo status`, `zibbo stats`, `zibbo doctor`. The
+plugin is UX only — every number comes from the gateway's loopback control API. Full
+design, including Codex setup and the internal API: [docs/PLUGIN_ARCHITECTURE.md](docs/PLUGIN_ARCHITECTURE.md).
 
 ## Endpoints
 

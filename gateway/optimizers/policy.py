@@ -21,10 +21,11 @@ from typing import TYPE_CHECKING, ClassVar
 from gateway.optimizers.models import SkipReason
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from gateway.config import Settings
     from gateway.optimizers.models import TransformationRequest
+    from gateway.runtime import RuntimeControl
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,16 +48,21 @@ class PolicyRule(ABC):
 
 
 class OptimizationEnabledRule(PolicyRule):
-    """A global kill switch. First rule, so it always wins."""
+    """A global kill switch. First rule, so it always wins.
+
+    Reads a live callable rather than a captured bool: the plugin's enable/disable
+    commands flip the runtime control at request time, and the change must take effect
+    on the next request without rebuilding every provider's policy.
+    """
 
     name: ClassVar[str] = "optimization-enabled"
 
-    def __init__(self, *, enabled: bool) -> None:
-        self._enabled = enabled
+    def __init__(self, is_enabled: Callable[[], bool]) -> None:
+        self._is_enabled = is_enabled
 
     def evaluate(self, request: TransformationRequest) -> PolicyDecision | None:
         del request
-        if not self._enabled:
+        if not self._is_enabled():
             return PolicyDecision(False, self.name, SkipReason.DISABLED)
         return None
 
@@ -155,10 +161,23 @@ class PolicyEngine:
         self._rules = tuple(rules)
 
     @classmethod
-    def from_settings(cls, settings: Settings, endpoint_policy: EndpointPolicy) -> PolicyEngine:
+    def from_settings(
+        cls,
+        settings: Settings,
+        endpoint_policy: EndpointPolicy,
+        control: RuntimeControl | None = None,
+    ) -> PolicyEngine:
+        # The runtime control is the live source of truth for the kill switch, seeded
+        # from settings at startup. When absent (unit tests build a policy in
+        # isolation), fall back to the static setting.
+        static_enabled = settings.optimization_enabled
+
+        def enabled_check() -> bool:
+            return control.optimization_enabled if control is not None else static_enabled
+
         return cls(
             [
-                OptimizationEnabledRule(enabled=settings.optimization_enabled),
+                OptimizationEnabledRule(enabled_check),
                 MethodRule(),
                 BodySizeRule(max_bytes=settings.optimization_max_body_bytes),
                 ContentTypeRule(),

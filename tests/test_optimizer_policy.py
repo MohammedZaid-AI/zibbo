@@ -128,7 +128,7 @@ def test_rules_abstain_by_returning_none() -> None:
     assert MethodRule().evaluate(_request(method="POST")) is None
     assert ContentTypeRule().evaluate(_request()) is None
     assert BodySizeRule(max_bytes=100).evaluate(_request()) is None
-    assert OptimizationEnabledRule(enabled=True).evaluate(_request()) is None
+    assert OptimizationEnabledRule(lambda: True).evaluate(_request()) is None
 
 
 def test_the_endpoint_rule_never_abstains() -> None:

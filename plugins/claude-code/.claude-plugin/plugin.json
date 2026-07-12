@@ -1,0 +1,11 @@
+{
+  "name": "zibbo",
+  "version": "0.1.0",
+  "description": "Deterministic token optimization for Claude Code. Surfaces status, stats, benchmarks and controls for your local Zibbo gateway — the plugin is UX only; all optimization happens in the gateway.",
+  "author": {
+    "name": "Zibbo",
+    "url": "https://github.com/MohammedZaid-AI/zibbo"
+  },
+  "homepage": "https://github.com/MohammedZaid-AI/zibbo",
+  "keywords": ["optimization", "tokens", "cache", "gateway", "proxy", "cost"]
+}

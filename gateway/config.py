@@ -215,6 +215,21 @@ class Settings(BaseSettings):
     cache_redis_prefix: str = "zibbo:xform:"
     """Namespace for this gateway's keys, so one Redis can serve several deployments."""
 
+    # -- Internal API (consumed by the Zibbo plugin) -----------------------
+    # The /internal/* endpoints describe and control this deployment (status, stats,
+    # enable/disable, doctor). They are for the local plugin, not for callers, so by
+    # default they answer only loopback requests. See docs/PLUGIN_ARCHITECTURE.md.
+    internal_api_allow_remote: bool = False
+    """Allow /internal/* from non-loopback clients. Requires a token when true."""
+
+    internal_api_token: SecretStr | None = None
+    """Bearer token gating /internal/* when remote access is enabled."""
+
+    analytics_cost_per_million_tokens: Annotated[float, Field(ge=0)] = 0.0
+    """Rate used to turn tokens saved into an estimated dollar figure. ``0`` shows no
+    cost estimate — the plugin then reports tokens only. This is a display estimate,
+    not billing; set it to your model's input price to see approximate savings."""
+
     # -- Tokenizer ---------------------------------------------------------
     tokenizer: TokenizerBackend = TokenizerBackend.AUTO
     tokenizer_default_encoding: str = "o200k_base"
