@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Zibbo — the deterministic token-optimization layer for AI coding assistants.",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "plugins": [
     {
       "name": "zibbo",
       "source": "./plugins/claude-code",
       "description": "Status, stats, benchmarks and controls for your local Zibbo gateway, inside Claude Code.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "keywords": ["optimization", "tokens", "cache", "gateway", "proxy"]
     }
   ]

@@ -158,4 +158,10 @@ class ClaudeStatusModel(_Frozen):
     cache_backend: str
     anthropic_route: str | None
     routing_observed: bool
+    """Ground truth: the gateway has served traffic on its Anthropic route this run."""
+    anthropic_requests_observed: int
+    """How many Anthropic requests the gateway has processed (recent window)."""
     authentication: ClaudeAuthModel
+    """Configured auth as seen from the *gateway process's* environment (best-effort)."""
+    observed_authentication: ClaudeAuthModel
+    """Auth actually observed on forwarded Anthropic requests. Reality, not intent."""

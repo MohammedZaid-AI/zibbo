@@ -136,7 +136,9 @@ def test_event_from_report_is_metadata_only() -> None:
         transformed_size_bytes=120,
         results=(result,),
     )
-    event = event_from_report(report, provider="openai", endpoint="chat/completions")
+    event = event_from_report(
+        report, provider="openai", endpoint="chat/completions", auth_method="oauth_token"
+    )
     assert event.tokens_before == 100
     assert event.tokens_after == 30
     assert event.tokens_saved == 70
@@ -144,6 +146,7 @@ def test_event_from_report_is_metadata_only() -> None:
     assert event.cache_hits == 1
     assert event.cache_lookups == 1
     assert event.cache_status == "hit"
+    assert event.auth_method == "oauth_token"  # observed credential kind, never the value
     # The transformed content never enters the event — only metadata does.
     assert "DISTINCTIVE_PROMPT_BODY" not in repr(event)
 

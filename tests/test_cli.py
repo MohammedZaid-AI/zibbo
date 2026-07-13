@@ -225,6 +225,54 @@ def test_parser_accepts_every_subcommand() -> None:
     assert args.model == "gpt-4o"
 
 
+def test_parser_accepts_plugin_actions() -> None:
+    parser = cli.build_parser()
+    assert parser.parse_args(["plugin"]).command == "plugin"
+    assert parser.parse_args(["plugin"]).action == "status"  # default
+    for action in ("status", "verify", "sync", "dev"):
+        assert parser.parse_args(["plugin", action]).action == action
+    assert parser.parse_args(["plugin", "sync", "--plugin-dir", "/x"]).plugin_dir == "/x"
+
+
+def test_bare_invocation_has_no_subcommand() -> None:
+    # A bare `zibbo` parses with command=None; main() maps that to the dashboard, so the
+    # plugin's `!`zibbo $ARGUMENTS`` with no argument works.
+    assert cli.build_parser().parse_args([]).command is None
+
+
+def test_banner_accepts_start_flag() -> None:
+    args = cli.build_parser().parse_args(["banner", "--start"])
+    assert args.command == "banner"
+    assert args.start is True
+
+
+def test_session_start_hook_is_exec_form_without_shell() -> None:
+    root = Path(__file__).resolve().parent.parent
+    hooks = json.loads(
+        (root / "plugins" / "claude-code" / "hooks" / "hooks.json").read_text(encoding="utf-8")
+    )
+    entry = hooks["hooks"]["SessionStart"][0]["hooks"][0]
+    assert entry["type"] == "command"
+    # Exec form: a bare executable plus an args vector — no shell string for a checker to
+    # reject and no bash dependency on any platform.
+    assert entry["command"] == "zibbo"
+    assert entry["args"] == ["banner", "--start"]
+    blob = entry["command"] + " " + " ".join(entry["args"])
+    for meta in ("${", "$(", "&&", "||", "`", ";", "|", ">"):
+        assert meta not in blob
+
+
+def test_slash_command_uses_documented_args_without_expansion() -> None:
+    root = Path(__file__).resolve().parent.parent
+    text = (root / "plugins" / "claude-code" / "commands" / "zibbo.md").read_text(encoding="utf-8")
+    # None of the constructs Claude Code's permission checker rejects.
+    for forbidden in ("${", "$(", "&&", "||", 'sh "', "command -v", "CLAUDE_PLUGIN_ROOT"):
+        assert forbidden not in text
+    # The documented argument mechanism, plus a matching allow rule.
+    assert "!`zibbo $ARGUMENTS`" in text
+    assert "Bash(zibbo *)" in text
+
+
 def test_marketplace_and_plugin_manifests_are_valid() -> None:
     root = Path(__file__).resolve().parent.parent
     for manifest in (
@@ -238,34 +286,51 @@ def test_marketplace_and_plugin_manifests_are_valid() -> None:
         assert isinstance(data, dict)
 
 
-# -- Phase 11: activation banner, dashboard, composite doctor ----------------
+# -- Phase 11 / 13: activation banner, dashboard (configured vs observed) -----
 
-_SUBSCRIPTION_AUTH = {
-    "present": True,
-    "label": "Claude subscription (OAuth login)",
-    "detail": "OAuth login managed by Claude Code",
-    "method": "subscription",
-    "is_api_key": False,
-}
+_CFG_SUBSCRIPTION = {"present": True, "label": "Claude subscription (OAuth login)"}
+_OBS_API_KEY = {"present": True, "label": "Claude API key"}
+_SUBSCRIPTION_AUTH = {"present": True, "label": "Claude subscription (OAuth login)"}
 
 
-def test_render_banner_active_when_routed() -> None:
+def _routing(*, configured: bool, observed: bool | None) -> dict[str, object]:
+    return {
+        "configured": configured,
+        "observed": observed,
+        "expected_base_url": "http://localhost:8000/anthropic",
+        "reason": "ANTHROPIC_BASE_URL is not set",
+    }
+
+
+def _auth(
+    *, configured: dict[str, object], observed: dict[str, object] | None
+) -> dict[str, object]:
+    return {"configured": configured, "observed": observed}
+
+
+def _stats(**kw: object) -> dict[str, object]:
+    base = {
+        "requests": 182,
+        "token_reduction_pct": 31.0,
+        "cache_hit_rate": 0.84,
+        "estimated_cost_usd": 3.91,
+    }
+    base.update(kw)
+    return base
+
+
+def test_render_banner_active_when_routing_observed() -> None:
     out = cli.render_banner(
         {
             "gateway": {"running": True, "version": "0.1.0"},
-            "auth": _SUBSCRIPTION_AUTH,
-            "routing": {
-                "routed": True,
-                "reason": "ok",
-                "expected_base_url": "http://localhost:8000/anthropic",
-            },
+            "auth": _auth(configured=_CFG_SUBSCRIPTION, observed=None),
+            "routing": _routing(configured=True, observed=True),
             "optimization_enabled": True,
             "cache": {"enabled": True, "backend": "memory"},
         }
     )
     assert "Zibbo Active" in out
     assert "Through Zibbo" in out
-    assert "Claude subscription (OAuth login)" in out
     assert "/zibbo" in out
 
 
@@ -273,12 +338,8 @@ def test_render_banner_one_step_left_never_mentions_api_keys() -> None:
     out = cli.render_banner(
         {
             "gateway": {"running": True, "version": "0.1.0"},
-            "auth": _SUBSCRIPTION_AUTH,
-            "routing": {
-                "routed": False,
-                "reason": "ANTHROPIC_BASE_URL is not set",
-                "expected_base_url": "http://localhost:8000/anthropic",
-            },
+            "auth": _auth(configured=_CFG_SUBSCRIPTION, observed=None),
+            "routing": _routing(configured=False, observed=False),
             "optimization_enabled": True,
             "cache": {"enabled": True, "backend": "memory"},
         }
@@ -293,38 +354,24 @@ def test_render_banner_gateway_down() -> None:
     out = cli.render_banner(
         {
             "gateway": None,
-            "auth": _SUBSCRIPTION_AUTH,
-            "routing": {
-                "routed": False,
-                "reason": "",
-                "expected_base_url": "http://localhost:8000/anthropic",
-            },
+            "auth": _auth(configured=_CFG_SUBSCRIPTION, observed=None),
+            "routing": _routing(configured=False, observed=None),
         }
     )
     assert "not running" in out.lower()
     assert "zibbo start" in out
 
 
-def test_render_dashboard_shows_savings_and_health() -> None:
+def test_render_dashboard_shows_savings_and_both_routing_views() -> None:
     out = cli.render_dashboard(
         {
             "gateway": {"version": "0.1.0", "environment": "development"},
             "provider": "Anthropic",
-            "auth": _SUBSCRIPTION_AUTH,
-            "routing": {
-                "routed": True,
-                "reason": "",
-                "expected_base_url": "http://localhost:8000/anthropic",
-            },
-            "stats": {
-                "requests": 182,
-                "token_reduction_pct": 31.0,
-                "cache_hit_rate": 0.84,
-                "estimated_cost_usd": 3.91,
-            },
+            "auth": _auth(configured=_CFG_SUBSCRIPTION, observed=_OBS_API_KEY),
+            "routing": _routing(configured=True, observed=True),
+            "stats": _stats(),
             "optimization_enabled": True,
             "cache": {"enabled": True, "backend": "memory"},
-            "healthy": True,
         }
     )
     assert "Anthropic" in out
@@ -333,33 +380,34 @@ def test_render_dashboard_shows_savings_and_health() -> None:
     assert "84.0%" in out
     assert "$3.91" in out
     assert "Healthy" in out
+    # Both views are rendered.
+    assert "Configured" in out
+    assert "Observed" in out
 
 
-def test_render_dashboard_nudges_routing_and_hints_savings_setup() -> None:
+def test_dashboard_prefers_observed_reality_over_env_intent() -> None:
+    # THE regression: the gateway has served Anthropic traffic (observed routing + auth),
+    # but ANTHROPIC_BASE_URL is not visible in this shell (configured=False). The old code
+    # showed "Not routed" / "Not authenticated" and "Needs attention" — internally
+    # inconsistent with 36 processed requests. Reality must win.
     out = cli.render_dashboard(
         {
             "gateway": {"version": "0.1.0", "environment": "development"},
-            "provider": "openai",
-            "auth": _SUBSCRIPTION_AUTH,
-            "routing": {
-                "routed": False,
-                "reason": "not set",
-                "expected_base_url": "http://localhost:8000/anthropic",
-            },
-            "stats": {
-                "requests": 0,
-                "token_reduction_pct": 0.0,
-                "cache_hit_rate": 0.0,
-                "estimated_cost_usd": None,
-            },
+            "provider": "Anthropic",
+            "auth": _auth(configured={"present": False, "label": ""}, observed=_OBS_API_KEY),
+            "routing": _routing(configured=False, observed=True),
+            "stats": _stats(requests=36, cache_hit_rate=0.93),
             "optimization_enabled": True,
             "cache": {"enabled": True, "backend": "memory"},
-            "healthy": False,
         }
     )
-    assert "Needs attention" in out
-    assert "export ANTHROPIC_BASE_URL" in out
-    assert "ZIBBO_ANALYTICS_COST_PER_MILLION_TOKENS" in out
+    assert "Healthy" in out  # not "Needs attention"
+    assert "Needs attention" not in out
+    assert "Active" in out  # observed routing
+    assert "Claude API key" in out  # observed auth, not "not authenticated"
+    # It exposes the mismatch instead of nagging to set the env var.
+    assert "Traffic is flowing through Zibbo" in out
+    assert "The only missing step is routing" not in out
 
 
 def test_render_doctor_shows_problem_reason_fix() -> None:
@@ -395,17 +443,25 @@ def test_render_claude_is_metadata_only() -> None:
             "cache_enabled": True,
             "cache_backend": "memory",
             "anthropic_route": "/anthropic",
-            "routing_observed": False,
+            "routing_observed": True,
+            "anthropic_requests_observed": 36,
             "authentication": {
-                "present": True,
-                "label": "Claude subscription (OAuth login)",
-                "method": "subscription",
+                "present": False,
+                "label": "Not authenticated",
+                "method": "none",
                 "detail": "",
+            },
+            "observed_authentication": {
+                "present": True,
+                "label": "Claude API key",
+                "method": "api_key",
+                "detail": "observed on forwarded Anthropic requests",
             },
         }
     )
     assert "/anthropic" in out
-    assert "Claude subscription (OAuth login)" in out
+    assert "36 Anthropic requests" in out
+    assert "Claude API key" in out  # observed reality shown even when env says none
 
 
 def test_routing_help_never_mentions_api_keys() -> None:

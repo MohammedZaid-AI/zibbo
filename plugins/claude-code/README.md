@@ -43,9 +43,9 @@ touches it.
 > gateway unchanged.
 
 > The package is not on PyPI yet, so `pip install zibbo` will **not** work — use the pipx
-> command above, or `pip install -e .` inside a clone for development. The plugin also works
-> if `zibbo` is not on PATH but the package is importable by your `python` — it falls back
-> to `python -m gateway.cli` automatically.
+> command above, or `pip install -e .` inside a clone for development. The hook and command
+> call `zibbo` directly (no shell), so it **must be on your `PATH`** — pipx guarantees that.
+> A `zibbo` living only inside a project virtualenv is invisible unless that venv is active.
 
 Prefer to make it permanent? Put `ANTHROPIC_BASE_URL` in `~/.claude/settings.json` under
 `"env"` and every session is routed automatically.
@@ -121,25 +121,41 @@ never mentions API keys:
 | Event | What the plugin does |
 |---|---|
 | **Plugin enabled** | Registers the `/zibbo` command and the `SessionStart` hook. No code runs yet. |
-| **Session start / resume** | The hook runs [`scripts/session-start.sh`](scripts/session-start.sh): resolves the CLI, runs `zibbo start` (instant if already running), then prints the activation banner (gateway, auth, routing, optimization, cache) via `zibbo banner`. |
-| **You run `/zibbo …`** | [`scripts/zibbo.sh`](scripts/zibbo.sh) resolves the CLI and runs the subcommand against the gateway's local HTTP API. |
-| **Gateway unreachable** | Commands print `no gateway at …` and suggest `/zibbo start`. |
-| **CLI not found** | Every surface prints the pipx install hint instead of failing silently. |
+| **Session start / resume** | The hook runs `zibbo banner --start` in [exec form](#why-no-shell-scripts): it starts the gateway (instant if already running), then prints the activation banner — gateway, auth, routing, optimization, cache. |
+| **You run `/zibbo …`** | The command runs `` !`zibbo $ARGUMENTS` `` — e.g. `/zibbo stats` runs `zibbo stats` against the gateway's local HTTP API. Bare `/zibbo` shows the dashboard. |
+| **Gateway unreachable** | The banner/command says the gateway is not running and how to start it. |
+| **`zibbo` not found** | Install it on PATH with pipx (below). |
 
 Claude Code does **not** provide session-end, tool-invocation, or per-request hooks that a
 UX plugin like this could use to optimize traffic — optimization is the gateway's job, and
 routing is set at launch (above). The plugin deliberately uses only the `SessionStart` hook
-and slash commands, both officially supported.
+and one slash command, both officially supported.
+
+### Why no shell scripts
+
+The hook and command invoke the `zibbo` executable **directly**, never through a shell:
+
+- The **hook** uses hooks [exec form](https://code.claude.com/docs/en/hooks) —
+  `{"type":"command","command":"zibbo","args":["banner","--start"]}`. Claude Code spawns
+  the executable with that argument vector and **no shell**, so there is no variable
+  expansion, no `&&`/`||`, and no bash dependency on any platform.
+- The **command** uses the documented `$ARGUMENTS` substitution and a matching
+  `allowed-tools: Bash(zibbo *)` rule, so the injected command is a literal `zibbo …` with
+  nothing for the permission checker to reject.
+
+Earlier versions shelled out (`sh "${CLAUDE_PLUGIN_ROOT}/…" ${ARGUMENTS:-status}`). Claude
+Code's permission checker rejects a `` !`command` `` that contains shell expansion, and the
+`sh` wrapper needed Git Bash. Both are gone — so `zibbo` must simply be on your `PATH`,
+which is exactly what pipx guarantees.
 
 ## Debugging
 
 Set `ZIBBO_DEBUG=1` before launching Claude Code (e.g. in `~/.claude/settings.json` `"env"`).
-Then the hook and CLI log each step to stderr — CLI resolution, gateway discovery, every
-HTTP request, and where initialization stops:
+Then the CLI logs each step to stderr — the command dispatched, gateway discovery, every
+HTTP request, and where things stop:
 
 ```
-[zibbo:debug] SessionStart hook firing (source=…/plugins/claude-code)
-[zibbo:debug] resolved CLI: python -m gateway.cli
+[zibbo:debug] command: banner
 [zibbo:debug] discovery: probing http://127.0.0.1:8000
 [zibbo:debug] GET http://127.0.0.1:8000/internal/version -> 200
 ```
@@ -151,3 +167,66 @@ exactly which check failed and how to fix it.
 
 The CLI finds the gateway at `$ZIBBO_GATEWAY_URL`, then by probing `127.0.0.1:8000`,
 `:8080`, `:8123`. Set `ZIBBO_GATEWAY_URL` to point at a custom port or host.
+
+## Developing the Claude Code plugin
+
+Claude Code does **not** run this repository directly. It installs a **copy**, and the
+copy is keyed by the plugin's `version`:
+
+```
+  Repository                you edit here
+  plugins/claude-code/
+        │  git push
+        ▼
+  Marketplace (GitHub)      MohammedZaid-AI/zibbo
+        │  /plugin marketplace update
+        ▼
+  Marketplace clone         ~/.claude/plugins/marketplaces/zibbo/
+        │  /plugin install / update  (only if version changed)
+        ▼
+  Version cache             ~/.claude/plugins/cache/zibbo/zibbo/<version>/
+        │
+        ▼
+  Running plugin            ← what actually executes
+```
+
+Per the [Claude Code docs](https://code.claude.com/docs/en/plugins-reference#version-management):
+*"users only receive updates when you bump this field … Pushing new commits without bumping
+it has no effect, and `/plugin update` reports 'already at the latest version'."* So if you
+edit files without bumping `version`, the running plugin stays stale.
+
+### While iterating — load the repo directly (no cache)
+
+The supported dev workflow bypasses the marketplace and cache entirely:
+
+```bash
+claude --plugin-dir "/path/to/zibbo/plugins/claude-code"
+```
+
+This overrides the installed marketplace plugin for that session. After editing hooks or
+commands, run `/reload-plugins`. Print the exact command for your checkout with:
+
+```bash
+zibbo plugin dev
+```
+
+### Checking and refreshing an installed copy
+
+```bash
+zibbo plugin status   # compare installed vs repo; list any stale executed files
+zibbo plugin verify   # fail loudly if the repo files contain shell expansion
+zibbo plugin sync     # copy repo commands/, hooks/, README into the installed cache
+```
+
+`zibbo plugin sync` refreshes the **content** of the already-installed cache in place, so
+you can test a fix without a full reinstall. It does not change the cache's version label.
+
+### Cutting a release (so real users get the update)
+
+1. Bump `version` in **both** `plugins/claude-code/.claude-plugin/plugin.json` and the
+   marketplace entry in `.claude-plugin/marketplace.json` (keep them equal).
+2. `git push`.
+3. Users run `/plugin marketplace update zibbo` then `/plugin update zibbo@zibbo`.
+
+Because the cache is version-keyed, the bump is what makes `/plugin update` fetch the new
+files instead of reporting "already at the latest version."

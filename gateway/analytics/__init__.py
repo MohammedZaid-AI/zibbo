@@ -34,14 +34,20 @@ __all__ = [
 
 
 def event_from_report(
-    report: TransformationReport, *, provider: str, endpoint: str
+    report: TransformationReport,
+    *,
+    provider: str,
+    endpoint: str,
+    auth_method: str | None = None,
 ) -> OptimizationEvent:
     """Reduce a ``TransformationReport`` to the metadata the engine aggregates.
 
     ``cache_lookups`` is the number of segments the pipeline considered — each is a
     potential cache hit — and ``cache_hits`` how many were served from the cache.
     ``steps`` is the ordered, de-duplicated union of the transformation steps applied
-    across every segment — the detail ``zibbo explain`` renders.
+    across every segment — the detail ``zibbo explain`` renders. ``auth_method`` is the
+    kind of credential the request carried (from the header name only, never the value):
+    how the gateway observes authentication as reality.
     """
     steps: list[str] = []
     for result in report.results:
@@ -64,4 +70,5 @@ def event_from_report(
         cache_lookups=len(report.results),
         execution_time_ms=report.execution_time_ms,
         steps=tuple(steps),
+        auth_method=auth_method,
     )

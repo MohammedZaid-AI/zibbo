@@ -23,6 +23,7 @@ from fastapi import APIRouter, Request, Response
 
 from gateway.analytics import event_from_report
 from gateway.api.deps import PipelineDep, ProviderRegistryDep, ProxyServiceDep
+from gateway.claude_env import classify_auth_header
 from gateway.logging import get_logger
 from gateway.middleware.request_context import (
     CACHE_HEADER,
@@ -125,7 +126,12 @@ def _record_analytics(
     if engine is None:
         return
     try:
-        engine.record(event_from_report(report, provider=provider, endpoint=endpoint))
+        # Observe the *kind* of credential the caller sent (header name only, never the
+        # value) so the gateway can report authentication and routing as reality.
+        auth_method = classify_auth_header(request.headers)
+        engine.record(
+            event_from_report(report, provider=provider, endpoint=endpoint, auth_method=auth_method)
+        )
     except Exception:  # noqa: BLE001 — analytics is best-effort, never load-bearing
         logger.warning("analytics_record_failed")
 

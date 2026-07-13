@@ -133,6 +133,65 @@ def detect_auth(
     )
 
 
+# -- Observed authentication (from forwarded request headers) ----------------
+
+
+def observed_auth(method: str | None) -> AuthInfo:
+    """Wrap an observed auth-method key (from :func:`classify_auth_header`) as AuthInfo.
+
+    ``method`` is what was actually seen on forwarded Anthropic requests. ``None`` means
+    no authenticated Anthropic traffic has been observed.
+    """
+    if method is None:
+        return AuthInfo(
+            method="none",
+            present=False,
+            detail="no authenticated Anthropic traffic observed",
+        )
+    return AuthInfo(
+        method=method,
+        present=True,
+        detail="observed on forwarded Anthropic requests",
+    )
+
+
+def _header_ci(headers: Mapping[str, str], name: str) -> str | None:
+    """Case-insensitive header lookup that returns whether a header is set, safely.
+
+    Used only to test presence and, for Authorization, the scheme — the credential value
+    is never returned to callers or logged.
+    """
+    getter = getattr(headers, "get", None)
+    if getter is not None:
+        # Starlette/httpx Headers are already case-insensitive.
+        value = headers.get(name)
+        if value is not None:
+            return value
+    for key, value in headers.items():
+        if key.lower() == name:
+            return value
+    return None
+
+
+def classify_auth_header(headers: Mapping[str, str]) -> str | None:
+    """Classify the *kind* of Anthropic credential on a request, from header names only.
+
+    This is how the gateway *observes* authentication: Anthropic uses ``x-api-key`` for
+    Console API keys and ``Authorization: Bearer`` for OAuth/subscription and auth tokens.
+    We read only which header is present (and, for Authorization, that the scheme is
+    Bearer) — never the credential value — so no secret is touched. Bearer is reported as
+    ``oauth_token`` (the common Claude Code subscription case); the environment-side
+    detector is what distinguishes OAuth from a custom auth token when it can. Returns a
+    method key from :data:`_AUTH_LABELS`, or ``None`` when no credential header is present.
+    """
+    if _header_ci(headers, "x-api-key"):
+        return "api_key"
+    authz = _header_ci(headers, "authorization") or ""
+    if authz[:7].lower() == "bearer " and authz[7:].strip():
+        return "oauth_token"
+    return None
+
+
 # -- Routing -----------------------------------------------------------------
 
 _ENV_BASE_URL = "ANTHROPIC_BASE_URL"

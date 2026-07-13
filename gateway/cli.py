@@ -10,7 +10,11 @@ own dependencies are not installed, and starts instantly. It talks to the gatewa
 the same public /internal/* HTTP API the plugins use; it never reaches into gateway
 internals.
 
-    zibbo status | stats | doctor | benchmark | enable | disable | logs | version | start
+    zibbo [status] | banner | claude | stats | doctor | explain | benchmark | logs
+          | enable | disable | version | start
+
+A bare ``zibbo`` shows the dashboard, so the plugin's ``!`zibbo $ARGUMENTS`` works with no
+argument. ``zibbo banner --start`` (the SessionStart hook) starts the gateway, then renders.
 """
 
 from __future__ import annotations
@@ -24,10 +28,14 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import gateway
+from gateway import plugin_dev
 from gateway.claude_env import detect_auth, detect_routing, read_claude_settings
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _PLUGIN_VERSION = gateway.__version__
 
@@ -224,6 +232,26 @@ def _kv_flag(ok: bool, key: str, value: str) -> str:
     return f"  {_TICK if ok else _CROSS} {key:<15}{value}"
 
 
+def _sub_flag(ok: bool, key: str, value: str) -> str:
+    return f"      {_TICK if ok else _CROSS} {key:<12}{value}"
+
+
+def _effective_routed(routing: dict[str, Any]) -> bool:
+    """Reality wins: observed traffic settles it; otherwise fall back to configuration."""
+    if routing.get("observed"):
+        return True
+    return bool(routing.get("configured"))
+
+
+def _auth_effective(auth: dict[str, Any]) -> dict[str, Any]:
+    """Prefer authentication actually observed on the wire over environment intent."""
+    observed: dict[str, Any] | None = auth.get("observed")
+    if observed and observed.get("present"):
+        return observed
+    configured: dict[str, Any] = auth["configured"]
+    return configured
+
+
 def render_banner(banner: dict[str, Any]) -> str:
     """The activation banner shown at every Claude Code startup (spec item 3)."""
     gateway = banner.get("gateway")
@@ -238,19 +266,25 @@ def render_banner(banner: dict[str, Any]) -> str:
             ]
         )
 
-    auth = banner["auth"]
     routing = banner["routing"]
     cache = banner["cache"]
-    routed = routing["routed"]
+    routed = _effective_routed(routing)
+    eff_auth = _auth_effective(banner["auth"])
     optimizing = banner["optimization_enabled"]
     lamp = _GREEN if routed else _YELLOW
     headline = "Zibbo Active" if routed else "Zibbo - one step left"
+    if routing.get("observed"):
+        routing_value = "Through Zibbo (traffic seen)"
+    elif routing.get("configured"):
+        routing_value = "Configured (no traffic yet)"
+    else:
+        routing_value = "Not routed"
     lines = [
         f"{lamp} {headline}".strip(),
         "",
         _kv_flag(True, "Gateway", f"Running ({gateway['version']})"),
-        _kv_flag(auth["present"], "Authentication", auth["label"]),
-        _kv_flag(routed, "Routing", "Through Zibbo" if routed else "Not routed"),
+        _kv_flag(eff_auth["present"], "Authentication", eff_auth["label"]),
+        _kv_flag(routed, "Routing", routing_value),
         _kv_flag(optimizing, "Optimization", "Enabled" if optimizing else "Disabled"),
         _kv_flag(
             cache["enabled"], "Cache", f"Ready ({cache['backend']})" if cache["enabled"] else "Off"
@@ -259,12 +293,12 @@ def render_banner(banner: dict[str, Any]) -> str:
     if routed:
         lines += ["", "  Type  /zibbo  for details."]
     else:
-        lines += _routing_help(auth, routing)
+        lines += _routing_help(eff_auth, routing)
     return "\n".join(lines)
 
 
 def render_dashboard(dash: dict[str, Any]) -> str:
-    """The friendly ``/zibbo`` / ``zibbo status`` dashboard (spec items 4 and 8)."""
+    """The ``/zibbo`` / ``zibbo status`` dashboard: configured intent vs observed reality."""
     gateway = dash["gateway"]
     stats = dash["stats"]
     auth = dash["auth"]
@@ -275,8 +309,6 @@ def render_dashboard(dash: dict[str, Any]) -> str:
     rows = [
         ("Gateway", f"Running ({gateway['version']}, {gateway['environment']})"),
         ("Provider", dash["provider"]),
-        ("Authentication", auth["label"]),
-        ("Routing", "Through Zibbo" if routing["routed"] else "Not routed"),
         ("Requests today", f"{stats['requests']:,}"),
         ("Average reduction", f"{stats['token_reduction_pct']}%"),
         ("Cache hit rate", f"{round(stats['cache_hit_rate'] * 100, 1)}%"),
@@ -286,16 +318,54 @@ def render_dashboard(dash: dict[str, Any]) -> str:
     ]
     lines = ["Zibbo", ""]
     lines += [f"  {label:<20}{value}" for label, value in rows]
-    lines += ["", f"  {'Status':<20}{'Healthy' if dash['healthy'] else 'Needs attention'}"]
-    if not routing["routed"]:
-        lines += _routing_help(auth, routing)
+
+    # Routing: configuration (this shell's intent) beside observation (the gateway's
+    # reality). Showing both is what exposes an environment mismatch at a glance.
+    configured = bool(routing.get("configured"))
+    observed = bool(routing.get("observed"))
+    lines += ["", "  Routing"]
+    lines.append(_sub_flag(configured, "Configured", "Yes" if configured else "No"))
+    lines.append(_sub_flag(observed, "Observed", "Active" if observed else "none yet"))
+
+    lines += ["", "  Authentication"]
+    cfg = auth["configured"]
+    lines.append(
+        _sub_flag(
+            cfg["present"],
+            "Configured",
+            cfg["label"] if cfg["present"] else "not detected in this shell",
+        )
+    )
+    obs_auth = auth.get("observed")
+    if obs_auth and obs_auth.get("present"):
+        lines.append(_sub_flag(True, "Observed", obs_auth["label"]))
+    else:
+        lines.append(_sub_flag(False, "Observed", "none yet"))
+
+    routed = _effective_routed(routing)
+    healthy = routed and dash["optimization_enabled"]
+    lines += ["", f"  {'Status':<20}{'Healthy' if healthy else 'Needs attention'}"]
+
+    if observed and not configured:
+        # The exact inconsistency the user hit: traffic is flowing, but the env var is not
+        # visible in this shell. That is fine — expose it, do not nag.
+        lines += [
+            "",
+            "  Traffic is flowing through Zibbo, so routing works. ANTHROPIC_BASE_URL is",
+            "  not visible in this shell — expected when Claude Code sets it via",
+            "  settings.json or a different shell. No action needed.",
+        ]
+    elif not routed:
+        lines += _routing_help(_auth_effective(auth), routing)
     return "\n".join(lines)
 
 
 def render_claude(data: dict[str, Any]) -> str:
     """Render the raw ``/internal/claude`` view (``zibbo claude``)."""
-    auth = data["authentication"]
+    configured = data["authentication"]
+    observed = data["observed_authentication"]
     route = data["anthropic_route"] or "not mounted"
+    seen = data.get("anthropic_requests_observed", 0)
     return "\n".join(
         [
             "Zibbo - Claude Code activation (gateway view)",
@@ -303,12 +373,14 @@ def render_claude(data: dict[str, Any]) -> str:
             _flag(data["gateway_running"], f"Gateway running ({data['gateway_version']})"),
             _flag(data["optimization_enabled"], "Optimization enabled"),
             _flag(data["cache_enabled"], f"Cache ({data['cache_backend']})"),
-            _flag(auth["present"], f"Authentication (gateway env): {auth['label']}"),
             f"  {_DOT} Anthropic route: {route}",
-            _flag(data["routing_observed"], "Anthropic traffic observed this run"),
+            _flag(data["routing_observed"], f"Routing observed ({seen} Anthropic requests)"),
+            _flag(observed["present"], f"Authentication observed: {observed['label']}"),
+            f"  {_DOT} Authentication (gateway env): {configured['label']}",
             "",
-            "  Authentication and routing are detected authoritatively by the CLI, inside",
-            "  Claude Code's own environment. This is the gateway's best-effort view.",
+            "  Observed values come from actual forwarded traffic (reality). Configured",
+            "  values come from environment inspection (intent). The CLI's dashboard reads",
+            "  configuration from Claude Code's own environment.",
         ]
     )
 
@@ -559,45 +631,80 @@ def _status_or_none(client: Client) -> dict[str, Any] | None:
     return data
 
 
+def _claude_or_none(client: Client) -> dict[str, Any] | None:
+    """Fetch /internal/claude (observed routing + auth), or None when unreachable."""
+    try:
+        data: dict[str, Any] = client.get("/internal/claude")
+    except GatewayError:
+        return None
+    return data
+
+
+def _activation_view(client: Client, claude: dict[str, Any] | None) -> dict[str, Any]:
+    """Combine configured intent (this shell's env) with observed reality (the gateway).
+
+    Environment variables describe intent; forwarded traffic describes reality. We surface
+    both so the two can be compared — and reality is what the effective state derives from.
+    """
+    auth_cfg = _auth_view()
+    routing_cfg = _routing_view(client.base_url)
+    observed_auth = None
+    if claude is not None:
+        oa = claude.get("observed_authentication") or {}
+        observed_auth = {"present": bool(oa.get("present")), "label": oa.get("label", "")}
+    return {
+        "routing": {
+            "configured": routing_cfg["routed"],
+            "observed": bool(claude["routing_observed"]) if claude is not None else None,
+            "expected_base_url": routing_cfg["expected_base_url"],
+            "reason": routing_cfg["reason"],
+        },
+        "auth": {
+            "configured": {"present": auth_cfg["present"], "label": auth_cfg["label"]},
+            "observed": observed_auth,
+        },
+    }
+
+
 def _cmd_status(client: Client, _args: argparse.Namespace) -> int:
     status = _status_or_none(client)
-    auth = _auth_view()
-    routing = _routing_view(client.base_url)
+    view = _activation_view(client, _claude_or_none(client))
     if status is None:
-        print(render_banner({"gateway": None, "auth": auth, "routing": routing}))
+        print(render_banner({"gateway": None, **view}))
         return 1
     stats_today: dict[str, Any] = client.get("/internal/stats")["today"]
     providers = status.get("providers", [])
-    provider = (
-        "Anthropic" if routing["routed"] else (", ".join(p["name"] for p in providers) or "none")
-    )
+    routed = _effective_routed(view["routing"])
+    provider = "Anthropic" if routed else (", ".join(p["name"] for p in providers) or "none")
     dash = {
         "gateway": {"version": status["version"], "environment": status["environment"]},
         "provider": provider,
-        "auth": auth,
-        "routing": routing,
+        "auth": view["auth"],
+        "routing": view["routing"],
         "stats": stats_today,
         "optimization_enabled": status["optimization_enabled"],
         "cache": {"enabled": status["cache_enabled"], "backend": status["cache_backend"]},
-        "healthy": bool(status["optimization_enabled"] and routing["routed"]),
     }
     print(render_dashboard(dash))
     return 0
 
 
-def _cmd_banner(client: Client, _args: argparse.Namespace) -> int:
+def _cmd_banner(client: Client, args: argparse.Namespace) -> int:
+    # The SessionStart hook runs `zibbo banner --start`: bring the gateway up (a no-op if
+    # it is already running), then render. One executable, no shell chaining.
+    if getattr(args, "start", False):
+        _start_gateway(client, port=None, announce=False)
     status = _status_or_none(client)
-    auth = _auth_view()
-    routing = _routing_view(client.base_url)
+    view = _activation_view(client, _claude_or_none(client))
     if status is None:
-        print(render_banner({"gateway": None, "auth": auth, "routing": routing}))
+        print(render_banner({"gateway": None, **view}))
         return 1
     print(
         render_banner(
             {
                 "gateway": {"running": True, "version": status["version"]},
-                "auth": auth,
-                "routing": routing,
+                "auth": view["auth"],
+                "routing": view["routing"],
                 "optimization_enabled": status["optimization_enabled"],
                 "cache": {"enabled": status["cache_enabled"], "backend": status["cache_backend"]},
             }
@@ -865,6 +972,121 @@ def _cmd_explain(client: Client, _args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_plugin(_client: Client, args: argparse.Namespace) -> int:
+    """Developer tooling for the Claude Code plugin (filesystem only; no gateway needed)."""
+    try:
+        repo = plugin_dev.repo_plugin_dir(args.plugin_dir)
+    except FileNotFoundError as exc:
+        print(f"{_CROSS} {exc}", file=sys.stderr)
+        return 2
+    action = getattr(args, "action", "status") or "status"
+    if action == "dev":
+        return _plugin_dev(repo)
+    if action == "verify":
+        return _plugin_verify(repo)
+    if action == "sync":
+        return _plugin_sync(repo)
+    return _plugin_status(repo)
+
+
+def _plugin_verify(repo: Path) -> int:
+    problems = plugin_dev.verify_plugin_dir(repo)
+    if problems:
+        print(f"{_CROSS} plugin files are NOT clean:")
+        for problem in problems:
+            print(f"    - {problem}")
+        return 1
+    print(f"{_TICK} plugin files are clean: exec-form hook, `!`zibbo $ARGUMENTS``, no expansion.")
+    return 0
+
+
+def _plugin_status(repo: Path) -> int:
+    repo_version = plugin_dev.read_plugin_version(repo)
+    print("Zibbo plugin")
+    print(f"  {_TICK} Repository version: {repo_version}")
+    print(f"       {repo}")
+    installed = plugin_dev.installed_cache_dirs()
+    if not installed:
+        print(f"  {_WARN} No installed copy under {plugin_dev.claude_plugins_home()}/cache")
+        print("       Install:  /plugin marketplace add MohammedZaid-AI/zibbo")
+        print("                 /plugin install zibbo@zibbo")
+        return 0
+    content_stale = False
+    version_mismatch = False
+    for directory in installed:
+        version = plugin_dev.read_plugin_version(directory) or directory.name
+        problems = plugin_dev.verify_plugin_dir(directory)
+        matches = version == repo_version and not problems
+        print(f"  {_TICK if matches else _WARN} Installed version: {version}")
+        print(f"       {directory}")
+        for problem in problems:
+            content_stale = True
+            print(f"       stale content: {problem}")
+        if version != repo_version and not problems:
+            version_mismatch = True
+            print(f"       content matches repo; version label is {version} (repo {repo_version})")
+    if content_stale:
+        print()
+        print("  The installed copy has stale content (the executed files are out of date).")
+        print("    zibbo plugin sync      # refresh the installed cache now (dev)")
+        print("    zibbo plugin dev       # or load the repo directly with --plugin-dir")
+        return 1
+    if version_mismatch:
+        print()
+        print("  Content is current. For a clean version bump, push and run /plugin update")
+        print("  (see 'Developing the Claude Code plugin' in the plugin README).")
+        return 0
+    print(f"\n  {_TICK} Installed copy matches the repository.")
+    return 0
+
+
+def _plugin_dev(repo: Path) -> int:
+    print("Zibbo plugin - local development")
+    print()
+    print("  Load the repository copy directly. It overrides the installed marketplace")
+    print("  plugin for the session - no cache, no version bump, instant:")
+    print()
+    print(f'    claude --plugin-dir "{repo}"')
+    print()
+    print("  After editing hooks or commands, run  /reload-plugins  in Claude Code.")
+    print("  This is the supported iteration workflow; `zibbo plugin sync` is for")
+    print("  refreshing an already-installed marketplace copy.")
+    return 0
+
+
+def _plugin_sync(repo: Path) -> int:
+    problems = plugin_dev.verify_plugin_dir(repo)
+    if problems:
+        print(f"{_CROSS} refusing to sync - the repository plugin itself is not clean:")
+        for problem in problems:
+            print(f"    - {problem}")
+        return 1
+    targets = plugin_dev.installed_cache_dirs()
+    clone = plugin_dev.marketplace_clone_dir()
+    if clone is not None:
+        targets.append(clone)
+    if not targets:
+        print(f"{_WARN} nothing installed to sync under {plugin_dev.claude_plugins_home()}")
+        print("      Use  zibbo plugin dev  for the --plugin-dir workflow, or install first.")
+        return 1
+    repo_version = plugin_dev.read_plugin_version(repo)
+    print("Zibbo plugin sync")
+    print(f"  {_TICK} Repository version: {repo_version}")
+    for target in targets:
+        written = plugin_dev.sync_plugin(repo, target)
+        remaining = plugin_dev.verify_plugin_dir(target)
+        if remaining:
+            print(f"  {_CROSS} {target}")
+            for problem in remaining:
+                print(f"       still stale: {problem}")
+            return 1
+        print(f"  {_TICK} Refreshed {', '.join(written)}")
+        print(f"       {target}")
+    print()
+    print(f"  {_TICK} Cache refreshed. Restart Claude Code (or run /reload-plugins).")
+    return 0
+
+
 def _cmd_version(client: Client, _args: argparse.Namespace) -> int:
     data = client.get("/internal/version")
     api = data["internal_api_version"]
@@ -872,10 +1094,16 @@ def _cmd_version(client: Client, _args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_start(client: Client, args: argparse.Namespace) -> int:
-    """Start the gateway if it is not already running, then wait for it to answer."""
+def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
+    """Start the gateway if it is not already running, then wait for it to answer.
+
+    ``announce`` prints success to stdout (the ``start`` command); the banner suppresses
+    it so the started gateway shows up in the banner itself, not as chatter above it.
+    Progress and errors always go to stderr. Returns 0 running, 1 not ready, 2 not installed.
+    """
     if client.reachable():
-        print(f"{_TICK} Zibbo already running at {client.base_url}")
+        if announce:
+            print(f"{_TICK} Zibbo already running at {client.base_url}")
         return 0
     try:
         import gateway  # noqa: F401 — verify the package is importable before spawning
@@ -891,8 +1119,8 @@ def _cmd_start(client: Client, args: argparse.Namespace) -> int:
     import subprocess
 
     env = dict(os.environ)
-    if args.port:
-        env["ZIBBO_PORT"] = str(args.port)
+    if port:
+        env["ZIBBO_PORT"] = str(port)
     creationflags = 0
     start_new_session = False
     if os.name == "nt":
@@ -913,10 +1141,15 @@ def _cmd_start(client: Client, args: argparse.Namespace) -> int:
     for _ in range(50):  # up to ~10s
         time.sleep(0.2)
         if client.reachable():
-            print(f"{_TICK} Zibbo running at {client.base_url}")
+            if announce:
+                print(f"{_TICK} Zibbo running at {client.base_url}")
             return 0
     print(f"{_CROSS} gateway did not become ready in time", file=sys.stderr)
     return 1
+
+
+def _cmd_start(client: Client, args: argparse.Namespace) -> int:
+    return _start_gateway(client, port=args.port, announce=True)
 
 
 _COMMANDS = {
@@ -930,6 +1163,7 @@ _COMMANDS = {
     "disable": _cmd_disable,
     "logs": _cmd_logs,
     "explain": _cmd_explain,
+    "plugin": _cmd_plugin,
     "version": _cmd_version,
     "start": _cmd_start,
 }
@@ -939,10 +1173,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="zibbo", description="Talk to a running Zibbo gateway.")
     parser.add_argument("--url", help=f"gateway base URL (default: discover, then {DEFAULT_URL})")
     parser.add_argument("--token", help="bearer token for a remote-enabled internal API")
-    sub = parser.add_subparsers(dest="command", required=True)
+    # Optional so a bare `zibbo` (and the plugin's `!`zibbo $ARGUMENTS`` with no argument)
+    # defaults to the dashboard instead of erroring.
+    sub = parser.add_subparsers(dest="command", required=False)
 
-    sub.add_parser("status", help="Zibbo activation dashboard")
-    sub.add_parser("banner", help="compact activation banner (used at session start)")
+    sub.add_parser("status", help="Zibbo activation dashboard (default)")
+    banner = sub.add_parser("banner", help="compact activation banner (used at session start)")
+    banner.add_argument(
+        "--start", action="store_true", help="start the gateway first if it is not running"
+    )
     sub.add_parser("claude", help="Claude Code activation status (gateway view)")
     sub.add_parser("stats", help="optimization statistics")
     sub.add_parser("doctor", help="run diagnostics")
@@ -970,6 +1209,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("explain", help="explain why the last request's tokens were reduced")
 
+    plugin = sub.add_parser("plugin", help="developer tooling for the Claude Code plugin")
+    plugin.add_argument(
+        "action",
+        nargs="?",
+        default="status",
+        choices=["status", "verify", "sync", "dev"],
+        help="status (default): compare installed vs repo; verify: check for shell "
+        "expansion; sync: refresh the installed cache; dev: print the --plugin-dir workflow",
+    )
+    plugin.add_argument("--plugin-dir", help="path to plugins/claude-code (default: this checkout)")
+
     start = sub.add_parser("start", help="start the gateway if it is not already running")
     start.add_argument("--port", type=int, help="port to start on (sets ZIBBO_PORT)")
 
@@ -979,10 +1229,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     _configure_output()
     args = build_parser().parse_args(argv)
-    _debug(f"command: {args.command}")
+    command = args.command or "status"  # bare `zibbo` shows the dashboard
+    _debug(f"command: {command}")
     token = args.token or os.environ.get(_ENV_TOKEN)
     client = discover(args.url, token)
-    handler = _COMMANDS[args.command]
+    handler = _COMMANDS[command]
     try:
         return handler(client, args)
     except GatewayError as exc:

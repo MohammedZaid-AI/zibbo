@@ -41,7 +41,7 @@ from gateway.api.schemas.internal import (
     VersionResponse,
     WindowStatsModel,
 )
-from gateway.claude_env import detect_auth, read_claude_settings
+from gateway.claude_env import detect_auth, observed_auth, read_claude_settings
 
 if TYPE_CHECKING:
     from gateway.analytics.models import WindowStats
@@ -119,9 +119,14 @@ async def claude(
         (entry.prefix for entry in state.mounted_providers if entry.provider.name == "anthropic"),
         None,
     )
-    routing_observed = anthropic_route is not None and any(
-        event.provider == "anthropic" for event in analytics.recent(100)
-    )
+    # Reality: what the gateway has actually served on its Anthropic route this run.
+    anthropic_events = [e for e in analytics.recent(200) if e.provider == "anthropic"]
+    requests_observed = len(anthropic_events)
+    routing_observed = anthropic_route is not None and requests_observed > 0
+    observed_method = next((e.auth_method for e in anthropic_events if e.auth_method), None)
+    observed = observed_auth(observed_method)
+
+    # Intent: what the gateway process's own environment says (best-effort).
     auth = detect_auth(os.environ, read_claude_settings())
     return ClaudeStatusModel(
         gateway_running=True,
@@ -134,11 +139,18 @@ async def claude(
         cache_backend=cache.backend_name,
         anthropic_route=anthropic_route,
         routing_observed=routing_observed,
+        anthropic_requests_observed=requests_observed,
         authentication=ClaudeAuthModel(
             method=auth.method,
             label=auth.label,
             present=auth.present,
             detail=auth.detail,
+        ),
+        observed_authentication=ClaudeAuthModel(
+            method=observed.method,
+            label=observed.label,
+            present=observed.present,
+            detail=observed.detail,
         ),
     )
 

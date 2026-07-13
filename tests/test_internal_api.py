@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from gateway.config import get_settings
@@ -105,10 +106,48 @@ async def test_claude_activation_status(
     assert body["gateway_running"] is True
     assert body["internal_api_version"] == "1"
     assert body["routing_observed"] is False  # no Anthropic traffic in this test run
+    assert body["anthropic_requests_observed"] == 0
     assert body["authentication"]["method"] == "api_key"
     assert body["authentication"]["present"] is True
+    # Nothing observed on the wire yet.
+    assert body["observed_authentication"]["present"] is False
     # The classification leaves; the credential never does.
     assert "SECRETVALUE" not in response.text
+
+
+@pytest.mark.integration
+async def test_claude_observes_authenticated_anthropic_traffic(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Reality over intent: once authenticated Anthropic traffic is recorded, the endpoint
+    reports it as observed — independent of any environment variable."""
+    from gateway.analytics.models import OptimizationEvent
+
+    app.state.analytics.record(
+        OptimizationEvent(
+            timestamp=0.0,
+            provider="anthropic",
+            endpoint="v1/messages",
+            applied=False,
+            skip_reason="content_already_optimal",
+            content_types=(),
+            transformers=(),
+            tokens_before=0,
+            tokens_after=0,
+            bytes_before=0,
+            bytes_after=0,
+            cache_hits=0,
+            cache_lookups=0,
+            execution_time_ms=0.0,
+            auth_method="oauth_token",
+        )
+    )
+    body = (await client.get("/internal/claude")).json()
+    assert body["anthropic_requests_observed"] >= 1
+    assert body["observed_authentication"]["present"] is True
+    assert body["observed_authentication"]["method"] == "oauth_token"
+    # routing_observed is true whenever the Anthropic route is mounted and traffic seen.
+    assert body["routing_observed"] is (body["anthropic_route"] is not None)
 
 
 # -- The loopback guard ------------------------------------------------------

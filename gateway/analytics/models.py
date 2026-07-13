@@ -40,6 +40,12 @@ class OptimizationEvent:
     ``converted_to_markdown`` — the detail behind ``zibbo explain``. Metadata, never
     content. Defaulted so older call sites and tests stay valid."""
 
+    auth_method: str | None = None
+    """The *kind* of credential observed on this request (``api_key``, ``oauth_token``,
+    …), classified from the auth header name only — never the value. This is how the
+    gateway *observes* authentication and routing as reality rather than intent. ``None``
+    when no credential header was present. Defaulted so older call sites stay valid."""
+
     @property
     def tokens_saved(self) -> int:
         return self.tokens_before - self.tokens_after

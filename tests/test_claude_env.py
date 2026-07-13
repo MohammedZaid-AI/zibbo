@@ -12,8 +12,10 @@ import json
 from pathlib import Path
 
 from gateway.claude_env import (
+    classify_auth_header,
     detect_auth,
     detect_routing,
+    observed_auth,
     read_claude_settings,
 )
 
@@ -88,6 +90,34 @@ def test_no_secret_ever_leaves_the_detector() -> None:
     auth = detect_auth(env, {"apiKeyHelper": _SECRET})
     blob = f"{auth!r} {auth.label} {auth.detail} {auth.also_present}"
     assert _SECRET not in blob
+
+
+# -- Observed authentication (from forwarded headers) ------------------------
+
+
+def test_classify_auth_header_by_header_name_only() -> None:
+    assert classify_auth_header({"x-api-key": _SECRET}) == "api_key"
+    assert classify_auth_header({"authorization": f"Bearer {_SECRET}"}) == "oauth_token"
+    assert classify_auth_header({"Authorization": f"bearer {_SECRET}"}) == "oauth_token"  # any case
+    assert classify_auth_header({"content-type": "application/json"}) is None
+    assert classify_auth_header({}) is None
+
+
+def test_classify_auth_header_never_returns_the_secret() -> None:
+    for headers in ({"x-api-key": _SECRET}, {"authorization": f"Bearer {_SECRET}"}):
+        result = classify_auth_header(headers)
+        assert result is not None
+        assert _SECRET not in result
+
+
+def test_observed_auth_wraps_method_as_authinfo() -> None:
+    present = observed_auth("api_key")
+    assert present.present is True
+    assert present.label == "Claude API key"
+
+    absent = observed_auth(None)
+    assert absent.present is False
+    assert absent.method == "none"
 
 
 # -- Routing -----------------------------------------------------------------
