@@ -10,6 +10,7 @@ Access is gated to loopback by ``require_local`` (applied to the whole /internal
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,8 @@ from gateway.api.schemas.internal import (
     INTERNAL_API_VERSION,
     BenchmarkRequest,
     BenchmarkResponse,
+    ClaudeAuthModel,
+    ClaudeStatusModel,
     DoctorCheck,
     DoctorResponse,
     LogEvent,
@@ -38,6 +41,7 @@ from gateway.api.schemas.internal import (
     VersionResponse,
     WindowStatsModel,
 )
+from gateway.claude_env import detect_auth, read_claude_settings
 
 if TYPE_CHECKING:
     from gateway.analytics.models import WindowStats
@@ -92,6 +96,50 @@ async def version(settings: SettingsDep) -> VersionResponse:
         gateway_version=settings.app_version,
         internal_api_version=INTERNAL_API_VERSION,
         app_name=settings.app_name,
+    )
+
+
+@router.get("/claude", response_model=ClaudeStatusModel, summary="Claude Code activation status")
+async def claude(
+    request: Request,
+    settings: SettingsDep,
+    cache: CacheDep,
+    control: RuntimeControlDep,
+    analytics: AnalyticsDep,
+) -> ClaudeStatusModel:
+    """What the gateway can tell about this deployment's Claude Code activation.
+
+    Auth here is detected from the *gateway's own* environment — a best-effort signal; the
+    authoritative read runs in the ``zibbo`` CLI, inside Claude Code's environment.
+    ``routing_observed`` is ground truth: the gateway has actually served Anthropic traffic
+    this run. No secret ever leaves this endpoint.
+    """
+    state = request.app.state
+    anthropic_route = next(
+        (entry.prefix for entry in state.mounted_providers if entry.provider.name == "anthropic"),
+        None,
+    )
+    routing_observed = anthropic_route is not None and any(
+        event.provider == "anthropic" for event in analytics.recent(100)
+    )
+    auth = detect_auth(os.environ, read_claude_settings())
+    return ClaudeStatusModel(
+        gateway_running=True,
+        gateway_version=settings.app_version,
+        internal_api_version=INTERNAL_API_VERSION,
+        environment=settings.environment.value,
+        uptime_seconds=round(time.monotonic() - state.started_at, 3),
+        optimization_enabled=control.optimization_enabled,
+        cache_enabled=cache.enabled,
+        cache_backend=cache.backend_name,
+        anthropic_route=anthropic_route,
+        routing_observed=routing_observed,
+        authentication=ClaudeAuthModel(
+            method=auth.method,
+            label=auth.label,
+            present=auth.present,
+            detail=auth.detail,
+        ),
     )
 
 

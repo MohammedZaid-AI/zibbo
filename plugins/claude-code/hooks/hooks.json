@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v zibbo >/dev/null 2>&1 && zibbo start 2>&1 || echo 'Zibbo: gateway CLI not found. Install with: pip install zibbo'",
-            "timeout": 15
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh\"",
+            "timeout": 20
           }
         ]
       }

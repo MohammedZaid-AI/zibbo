@@ -29,8 +29,11 @@ block. Do not invent numbers or summarize unless the user asks a follow-up.
 | Turn optimization on / off | `zibbo enable` / `zibbo disable` |
 | Start the gateway | `zibbo start` |
 
-If `zibbo` is not found, tell the user to install the gateway with `pip install zibbo`.
-If the gateway is unreachable, tell them to run `zibbo start`.
+If `zibbo` is not found, tell the user to install the gateway so the CLI is on their PATH:
+`pipx install git+https://github.com/MohammedZaid-AI/zibbo` (the package is not on PyPI, so
+plain `pip install zibbo` will not work). If the gateway is unreachable, tell them to run
+`zibbo start`. As a fallback when `zibbo` is not on PATH but the package is importable,
+`python -m gateway.cli <subcommand>` runs the same CLI.
 
 ## Routing Codex through Zibbo (manual, one-time)
 

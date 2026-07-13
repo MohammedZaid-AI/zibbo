@@ -91,6 +91,26 @@ async def test_doctor_warns_when_optimization_is_off(client: AsyncClient) -> Non
     assert opt["fix"] is not None
 
 
+@pytest.mark.integration
+async def test_claude_activation_status(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Pin the environment so the classification is deterministic regardless of the runner.
+    for higher in ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"):
+        monkeypatch.delenv(higher, raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-SECRETVALUE-should-never-leak")
+    response = await client.get("/internal/claude")
+    body = response.json()
+    assert body["gateway_running"] is True
+    assert body["internal_api_version"] == "1"
+    assert body["routing_observed"] is False  # no Anthropic traffic in this test run
+    assert body["authentication"]["method"] == "api_key"
+    assert body["authentication"]["present"] is True
+    # The classification leaves; the credential never does.
+    assert "SECRETVALUE" not in response.text
+
+
 # -- The loopback guard ------------------------------------------------------
 
 

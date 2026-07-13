@@ -128,3 +128,34 @@ class LogEvent(_Frozen):
 class LogsResponse(_Frozen):
     count: int
     events: list[LogEvent]
+
+
+class ClaudeAuthModel(_Frozen):
+    """The *kind* of Claude authentication the gateway process can observe. No secrets."""
+
+    method: str
+    label: str
+    present: bool
+    detail: str
+
+
+class ClaudeStatusModel(_Frozen):
+    """Everything the plugin's Claude activation view needs, from the gateway's vantage.
+
+    Auth and routing here reflect the *gateway process's* own environment, which is a
+    best-effort signal — the authoritative detection runs in the ``zibbo`` CLI, inside
+    Claude Code's environment. ``routing_observed`` is ground truth: it is true once the
+    gateway has actually served traffic on its Anthropic route this run.
+    """
+
+    gateway_running: bool
+    gateway_version: str
+    internal_api_version: str
+    environment: str
+    uptime_seconds: float
+    optimization_enabled: bool
+    cache_enabled: bool
+    cache_backend: str
+    anthropic_route: str | None
+    routing_observed: bool
+    authentication: ClaudeAuthModel

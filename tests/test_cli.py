@@ -208,6 +208,8 @@ def test_parser_accepts_every_subcommand() -> None:
     parser = cli.build_parser()
     for command in (
         "status",
+        "banner",
+        "claude",
         "stats",
         "doctor",
         "enable",
@@ -234,3 +236,184 @@ def test_marketplace_and_plugin_manifests_are_valid() -> None:
     ):
         data = json.loads(manifest.read_text(encoding="utf-8"))
         assert isinstance(data, dict)
+
+
+# -- Phase 11: activation banner, dashboard, composite doctor ----------------
+
+_SUBSCRIPTION_AUTH = {
+    "present": True,
+    "label": "Claude subscription (OAuth login)",
+    "detail": "OAuth login managed by Claude Code",
+    "method": "subscription",
+    "is_api_key": False,
+}
+
+
+def test_render_banner_active_when_routed() -> None:
+    out = cli.render_banner(
+        {
+            "gateway": {"running": True, "version": "0.1.0"},
+            "auth": _SUBSCRIPTION_AUTH,
+            "routing": {
+                "routed": True,
+                "reason": "ok",
+                "expected_base_url": "http://localhost:8000/anthropic",
+            },
+            "optimization_enabled": True,
+            "cache": {"enabled": True, "backend": "memory"},
+        }
+    )
+    assert "Zibbo Active" in out
+    assert "Through Zibbo" in out
+    assert "Claude subscription (OAuth login)" in out
+    assert "/zibbo" in out
+
+
+def test_render_banner_one_step_left_never_mentions_api_keys() -> None:
+    out = cli.render_banner(
+        {
+            "gateway": {"running": True, "version": "0.1.0"},
+            "auth": _SUBSCRIPTION_AUTH,
+            "routing": {
+                "routed": False,
+                "reason": "ANTHROPIC_BASE_URL is not set",
+                "expected_base_url": "http://localhost:8000/anthropic",
+            },
+            "optimization_enabled": True,
+            "cache": {"enabled": True, "backend": "memory"},
+        }
+    )
+    assert "one step left" in out
+    assert "authenticated correctly" in out
+    assert "export ANTHROPIC_BASE_URL=http://localhost:8000/anthropic" in out
+    assert "API key" not in out  # a subscription user is never told to make one
+
+
+def test_render_banner_gateway_down() -> None:
+    out = cli.render_banner(
+        {
+            "gateway": None,
+            "auth": _SUBSCRIPTION_AUTH,
+            "routing": {
+                "routed": False,
+                "reason": "",
+                "expected_base_url": "http://localhost:8000/anthropic",
+            },
+        }
+    )
+    assert "not running" in out.lower()
+    assert "zibbo start" in out
+
+
+def test_render_dashboard_shows_savings_and_health() -> None:
+    out = cli.render_dashboard(
+        {
+            "gateway": {"version": "0.1.0", "environment": "development"},
+            "provider": "Anthropic",
+            "auth": _SUBSCRIPTION_AUTH,
+            "routing": {
+                "routed": True,
+                "reason": "",
+                "expected_base_url": "http://localhost:8000/anthropic",
+            },
+            "stats": {
+                "requests": 182,
+                "token_reduction_pct": 31.0,
+                "cache_hit_rate": 0.84,
+                "estimated_cost_usd": 3.91,
+            },
+            "optimization_enabled": True,
+            "cache": {"enabled": True, "backend": "memory"},
+            "healthy": True,
+        }
+    )
+    assert "Anthropic" in out
+    assert "182" in out
+    assert "31.0%" in out
+    assert "84.0%" in out
+    assert "$3.91" in out
+    assert "Healthy" in out
+
+
+def test_render_dashboard_nudges_routing_and_hints_savings_setup() -> None:
+    out = cli.render_dashboard(
+        {
+            "gateway": {"version": "0.1.0", "environment": "development"},
+            "provider": "openai",
+            "auth": _SUBSCRIPTION_AUTH,
+            "routing": {
+                "routed": False,
+                "reason": "not set",
+                "expected_base_url": "http://localhost:8000/anthropic",
+            },
+            "stats": {
+                "requests": 0,
+                "token_reduction_pct": 0.0,
+                "cache_hit_rate": 0.0,
+                "estimated_cost_usd": None,
+            },
+            "optimization_enabled": True,
+            "cache": {"enabled": True, "backend": "memory"},
+            "healthy": False,
+        }
+    )
+    assert "Needs attention" in out
+    assert "export ANTHROPIC_BASE_URL" in out
+    assert "ZIBBO_ANALYTICS_COST_PER_MILLION_TOKENS" in out
+
+
+def test_render_doctor_shows_problem_reason_fix() -> None:
+    out = cli.render_doctor(
+        {
+            "healthy": False,
+            "checks": [
+                {"name": "gateway", "status": "ok", "detail": "running 0.1.0"},
+                {
+                    "name": "routing",
+                    "status": "warn",
+                    "detail": "not routed through Zibbo",
+                    "problem": "this session's Claude traffic bypasses Zibbo",
+                    "reason": "ANTHROPIC_BASE_URL is not set",
+                    "fix": "export ANTHROPIC_BASE_URL=http://localhost:8000/anthropic",
+                },
+            ],
+        }
+    )
+    assert "problem:" in out
+    assert "reason:" in out
+    assert "fix:" in out
+    assert "Working, with warnings" in out  # a warn is not a failure
+
+
+def test_render_claude_is_metadata_only() -> None:
+    out = cli.render_claude(
+        {
+            "gateway_running": True,
+            "gateway_version": "0.1.0",
+            "internal_api_version": "1",
+            "optimization_enabled": True,
+            "cache_enabled": True,
+            "cache_backend": "memory",
+            "anthropic_route": "/anthropic",
+            "routing_observed": False,
+            "authentication": {
+                "present": True,
+                "label": "Claude subscription (OAuth login)",
+                "method": "subscription",
+                "detail": "",
+            },
+        }
+    )
+    assert "/anthropic" in out
+    assert "Claude subscription (OAuth login)" in out
+
+
+def test_routing_help_never_mentions_api_keys() -> None:
+    text = "\n".join(
+        cli._routing_help(
+            _SUBSCRIPTION_AUTH,
+            {"routed": False, "expected_base_url": "http://localhost:8000/anthropic", "reason": ""},
+        )
+    )
+    assert "api key" not in text.lower()
+    assert "export ANTHROPIC_BASE_URL=http://localhost:8000/anthropic" in text
