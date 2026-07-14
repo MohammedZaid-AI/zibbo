@@ -1,0 +1,66 @@
+#!/usr/bin/env sh
+# ZIBBO_RESOLVER_SHIM — the one shared helper behind BOTH the /zibbo slash command and the
+# SessionStart hook, so they behave identically. It does not assume a global `zibbo`.
+#
+# Claude Code adds a plugin's bin/ to the Bash tool's PATH while the plugin is enabled, so
+# `!`zibbo $ARGUMENTS`` (slash command) and exec-form `zibbo` (hook) both land here. This is
+# a script FILE, not a slash-command `!` line, so its ordinary shell logic is never seen by
+# the permission checker — the command and hook stay clean (no expansion, exec form).
+#
+# Resolution order:
+#   1. a real `zibbo` on PATH (any bin that is not one of these shims)
+#   2. py      -m gateway.cli   (Windows launcher, only if it can import gateway)
+#   3. python  -m gateway.cli   (only if it can import gateway)
+#   4. python3 -m gateway.cli   (only if it can import gateway)
+#   5. the repository checkout this shim ships in (PYTHONPATH=<repo>)
+#   6. otherwise, print install instructions and exit non-zero
+#
+# Works on Windows (Git Bash), macOS and Linux.
+
+set -u
+
+# 1. A real zibbo anywhere on PATH. Shims carry the ZIBBO_RESOLVER_SHIM marker and are
+#    skipped, so this can never recurse regardless of PATH ordering or how we were invoked.
+_oldifs=${IFS:-}
+IFS=:
+for _dir in $PATH; do
+  [ -n "$_dir" ] || continue
+  for _exe in "$_dir/zibbo" "$_dir/zibbo.exe"; do
+    if [ -x "$_exe" ] && ! grep -q "ZIBBO_RESOLVER_SHIM" "$_exe" 2>/dev/null; then
+      IFS=$_oldifs
+      exec "$_exe" "$@"
+    fi
+  done
+done
+IFS=$_oldifs
+
+# 2-4. A Python interpreter that can actually import the gateway package.
+for _py in py python python3; do
+  if command -v "$_py" >/dev/null 2>&1 && "$_py" -c "import gateway" >/dev/null 2>&1; then
+    exec "$_py" -m gateway.cli "$@"
+  fi
+done
+
+# 5. The repository checkout this shim lives in: <repo>/plugins/claude-code/bin/zibbo.
+_self=$0
+case "$_self" in
+  */*) : ;;
+  *) _self=$(command -v -- "$_self" 2>/dev/null || printf '%s' "$_self") ;;
+esac
+_repo=$(cd -- "$(dirname -- "$_self")/../../.." 2>/dev/null && pwd)
+if [ -n "${_repo:-}" ] && [ -f "$_repo/gateway/__init__.py" ]; then
+  for _py in py python python3; do
+    if command -v "$_py" >/dev/null 2>&1; then
+      PYTHONPATH="$_repo" exec "$_py" -m gateway.cli "$@"
+    fi
+  done
+fi
+
+# 6. Nothing worked — the only case that shows install instructions.
+echo "Zibbo CLI not found. Install it so Claude Code can see it:" >&2
+if [ -n "${_repo:-}" ] && [ -f "$_repo/pyproject.toml" ]; then
+  echo "  pipx install \"$_repo\"" >&2
+else
+  echo "  pipx install git+https://github.com/MohammedZaid-AI/zibbo" >&2
+fi
+exit 127

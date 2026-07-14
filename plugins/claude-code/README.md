@@ -1,8 +1,12 @@
+<div align="center">
+<img src="../../docs/assets/avatar.png" alt="Zibbo" width="120" height="120" />
+</div>
+
 # Zibbo for Claude Code
 
 The companion plugin for [Zibbo](https://github.com/MohammedZaid-AI/zibbo), the
 deterministic token-optimization gateway. **The plugin is UX only** — every byte of
-optimization happens in the gateway. This package adds a `/zibbo` command and a
+optimization happens in the gateway. This package adds `/zibbo:*` commands and a
 session-start banner; it shells out to the `zibbo` CLI and never re-implements gateway
 logic.
 
@@ -16,7 +20,7 @@ Enabling the plugin is step one of two. For Zibbo to actually save you tokens:
    *cannot* rewrite the running session's traffic. That is a Claude Code limitation, not a
    bug. See [Route Claude Code through Zibbo](#route-claude-code-through-zibbo).
 
-If only (1) is true, `/zibbo` works and the gateway runs, but nothing gets optimized. The
+If only (1) is true, `/zibbo:zibbo` works and the gateway runs, but nothing gets optimized. The
 session-start banner tells you which of the two is missing.
 
 ## Setup — the whole thing
@@ -81,7 +85,7 @@ Every session begins with the activation banner:
   ✓ Optimization   Enabled
   ✓ Cache          Ready (memory)
 
-  Type  /zibbo  for details.
+  Try  /zibbo:zibbo  (dashboard)  ·  /zibbo:stats  ·  /zibbo:doctor
 ```
 
 If routing is the only thing missing, the banner tells you exactly how to fix it — and
@@ -105,24 +109,31 @@ never mentions API keys:
 
 ## Commands
 
+Claude Code namespaces every plugin command as `/<plugin>:<command>`, so all Zibbo commands
+begin with `/zibbo:`. Type `/zibbo` and the autocomplete lists them all — nothing to memorize.
+
 | Command | What it shows |
 |---|---|
-| `/zibbo` or `/zibbo status` | The activation dashboard: gateway, provider, authentication, routing, requests today, average reduction, cache hit rate, estimated savings, overall status |
-| `/zibbo doctor` | Diagnostics — gateway, auth, routing, port, plugin, env vars, version, connectivity, cache, transformers, provider — each failed check with problem, reason, exact fix |
-| `/zibbo stats` | Requests, cache hit rate, tokens saved, top transformer, latency |
-| `/zibbo explain` | Why the last request's tokens were reduced |
-| `/zibbo benchmark` | Replay the last request's metadata through the pipeline (no upstream call) |
-| `/zibbo logs` | Recent optimization activity (metadata only — never prompt contents) |
-| `/zibbo enable` / `/zibbo disable` | Turn transformations on/off at runtime |
-| `/zibbo start` | Start the gateway if it is not already running |
+| `/zibbo:zibbo` | The activation dashboard: gateway, provider, authentication, routing, requests today, average reduction, cache hit rate, estimated savings, overall status |
+| `/zibbo:doctor` | Diagnostics — gateway, auth, routing, port, plugin, env vars, version, connectivity, cache, transformers, provider — each failed check with problem, reason, exact fix |
+| `/zibbo:stats` | Requests, cache hit rate, tokens saved, top transformer, latency |
+| `/zibbo:explain` | Why the last request's tokens were reduced |
+| `/zibbo:benchmark` | Replay the last request's metadata through the pipeline (no upstream call) |
+| `/zibbo:logs` | Recent optimization activity (metadata only — never prompt contents) |
+| `/zibbo:claude` | Claude Code activation status from the gateway's point of view |
+| `/zibbo:enable` / `/zibbo:disable` | Turn transformations on/off at runtime |
+| `/zibbo:start` | Start the gateway if it is not already running |
+
+The dashboard command also accepts an argument, so `/zibbo:zibbo stats` is equivalent to
+`/zibbo:stats`.
 
 ## Lifecycle — what happens, and when
 
 | Event | What the plugin does |
 |---|---|
-| **Plugin enabled** | Registers the `/zibbo` command and the `SessionStart` hook. No code runs yet. |
+| **Plugin enabled** | Registers the `/zibbo:*` commands and the `SessionStart` hook. No code runs yet. |
 | **Session start / resume** | The hook runs `zibbo banner --start` in [exec form](#why-no-shell-scripts): it starts the gateway (instant if already running), then prints the activation banner — gateway, auth, routing, optimization, cache. |
-| **You run `/zibbo …`** | The command runs `` !`zibbo $ARGUMENTS` `` — e.g. `/zibbo stats` runs `zibbo stats` against the gateway's local HTTP API. Bare `/zibbo` shows the dashboard. |
+| **You run `/zibbo:stats` (etc.)** | The command runs `` !`zibbo stats $ARGUMENTS` `` against the gateway's local HTTP API. `/zibbo:zibbo` shows the dashboard. |
 | **Gateway unreachable** | The banner/command says the gateway is not running and how to start it. |
 | **`zibbo` not found** | Install it on PATH with pipx (below). |
 
@@ -160,13 +171,33 @@ HTTP request, and where things stop:
 [zibbo:debug] GET http://127.0.0.1:8000/internal/version -> 200
 ```
 
-If nothing seems to happen after enabling the plugin, run `/zibbo doctor` — it reports
+If nothing seems to happen after enabling the plugin, run `/zibbo:doctor` — it reports
 exactly which check failed and how to fix it.
 
 ## Discovery
 
 The CLI finds the gateway at `$ZIBBO_GATEWAY_URL`, then by probing `127.0.0.1:8000`,
 `:8080`, `:8123`. Set `ZIBBO_GATEWAY_URL` to point at a custom port or host.
+
+## How the plugin finds the CLI
+
+The plugin does **not** assume a global `zibbo`. It ships a resolver shim at
+[`bin/zibbo`](bin/zibbo); Claude Code adds a plugin's `bin/` to the Bash tool's PATH while
+the plugin is enabled, so `` !`zibbo $ARGUMENTS` `` (the command) and exec-form `zibbo` (the
+hook) both reach the shim. One shared helper, so command and hook behave identically. The
+shim resolves in order:
+
+1. a real `zibbo` on PATH (e.g. a pipx install)
+2. `py -m gateway.cli` (Windows, if it can import `gateway`)
+3. `python -m gateway.cli`
+4. `python3 -m gateway.cli`
+5. the repository checkout the shim ships in (`PYTHONPATH=<repo>`)
+6. otherwise, print install instructions
+
+So a `pipx install` works, and so does a plain checkout where `python` can import `gateway`
+— no global `zibbo` required. The shim is an ordinary script, so its logic never touches the
+slash-command permission checker; the command stays `` !`zibbo $ARGUMENTS` `` and the hook
+stays exec form.
 
 ## Developing the Claude Code plugin
 

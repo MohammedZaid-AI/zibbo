@@ -5,6 +5,7 @@ exist, the README shows labelled placeholders.
 
 | File | Shows | Suggested capture |
 |---|---|---|
+| `avatar.png` | The project avatar shown at the top of the README | 160×160 (or square) brand image |
 | `demo.gif` | The hero loop | Paste a big HTML page into Claude Code, then run `/zibbo explain` |
 | `explain.png` | Per-request savings | `zibbo explain` after a real optimized request |
 | `status.png` | Gateway health | `zibbo status` with the gateway running |

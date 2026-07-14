@@ -61,7 +61,12 @@ does not change. `MagicBytesSniffer` already exists for exactly this: Phase 7 ex
 a table of file signatures.
 
 The same seam takes PII masking, content hashing and deduplication: they are
-transformers or policy rules, not gateway changes.
+transformers or policy rules, not gateway changes. The **prompt** transformer
+(`ContentType.PROMPT`, priority 90) is exactly this pattern — a `PromptSniffer` plus a
+`PromptTransformer` that removes exact-duplicate instruction blocks and repeated sections
+from long coding prompts. It is opt-in and added to (or removed from) the registry and
+detector together, live, by `zibbo enable/disable prompt`; see
+[PROMPT_OPTIMIZATION.md](PROMPT_OPTIMIZATION.md).
 
 ## The two invariants
 

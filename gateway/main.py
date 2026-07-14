@@ -37,6 +37,7 @@ from gateway.middleware.request_context import (
 from gateway.optimizers import (
     ContentDetector,
     OptimizerOptions,
+    apply_prompt_optimization,
     build_pipeline,
     build_provider_policy,
     build_transformer_registry,
@@ -192,10 +193,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     plugin_report = plugins.attach(registry, detector)
     app.state.plugins = plugins
 
-    # The internal API's /status lists the active transformers; expose the registry it
-    # reads from. Kept on state rather than reached through the pipeline so the two do
-    # not have to grow a coupling for one read.
+    # Prompt de-duplication: seed the detector's sniffer to match the runtime flag
+    # (itself seeded from settings). The transformer was already registered by
+    # build_transformer_registry when enabled; this brings the sniffer into line, and is
+    # also the entry point the /internal enable/disable endpoints reuse live.
+    apply_prompt_optimization(
+        registry, detector, options, enabled=app.state.runtime.prompt_optimization_enabled
+    )
+
+    # The internal API's /status lists the active transformers; expose the registry and
+    # detector it reads from and toggles. Kept on state rather than reached through the
+    # pipeline so the two do not have to grow a coupling for one read.
     app.state.transformer_registry = registry
+    app.state.detector = detector
+    app.state.optimizer_options = options
 
     document_service = build_document_service(settings)
     app.state.documents = document_service
@@ -278,7 +289,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # lifespan, because the per-provider policies built below close over the runtime
     # control to read the optimization kill switch live. The analytics engine records
     # every request's optimization outcome for the plugin's /internal/stats view.
-    app.state.runtime = RuntimeControl(optimization_enabled=settings.optimization_enabled)
+    app.state.runtime = RuntimeControl(
+        optimization_enabled=settings.optimization_enabled,
+        prompt_optimization_enabled=settings.prompt_optimization_enabled,
+    )
     app.state.analytics = AnalyticsEngine()
 
     # Providers are constructed here — synchronously, no I/O — so their route

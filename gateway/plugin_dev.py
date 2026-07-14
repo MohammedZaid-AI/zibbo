@@ -40,10 +40,14 @@ FORBIDDEN_COMMAND_SNIPPETS = (
 # Shell metacharacters that must never appear in the exec-form hook invocation.
 FORBIDDEN_HOOK_SNIPPETS = ("&&", "||", "${", "$(", "command -v", 'sh "')
 
-# Files whose content is executed by Claude Code — what ``sync`` refreshes. Note
-# ``.claude-plugin/plugin.json`` is intentionally excluded so a content refresh never
-# rewrites the cache directory's version label.
-SYNC_PATHS = ("commands", "hooks", "README.md")
+# Files whose content is executed by Claude Code — what ``sync`` refreshes. ``bin`` holds
+# the resolver shim that puts ``zibbo`` on the Bash tool's PATH. ``.claude-plugin/plugin.json``
+# is intentionally excluded so a content refresh never rewrites the cache version label.
+SYNC_PATHS = ("commands", "hooks", "bin", "README.md")
+
+# The resolver shim carries this marker; it is how both the shim and this verifier tell a
+# shim apart from a real ``zibbo`` executable.
+RESOLVER_MARKER = "ZIBBO_RESOLVER_SHIM"
 
 
 # -- Locating the repository plugin and the installed copies ------------------
@@ -139,16 +143,33 @@ def verify_hooks_text(text: str) -> list[str]:
 def verify_plugin_dir(plugin_dir: Path) -> list[str]:
     """Every problem with a plugin directory's executed files. Empty means clean."""
     problems: list[str] = []
-    command = plugin_dir / "commands" / "zibbo.md"
+    commands = plugin_dir / "commands"
+    command = commands / "zibbo.md"
     hooks = plugin_dir / "hooks" / "hooks.json"
     if not command.is_file():
         problems.append("missing commands/zibbo.md")
     else:
         problems += verify_command_text(command.read_text(encoding="utf-8"))
+    # Every per-action command file must also be free of forbidden shell syntax.
+    if commands.is_dir():
+        for md in sorted(commands.glob("*.md")):
+            if md.name == "zibbo.md":
+                continue
+            text = md.read_text(encoding="utf-8")
+            problems += [
+                f"commands/{md.name} contains forbidden shell syntax {bad!r}"
+                for bad in FORBIDDEN_COMMAND_SNIPPETS
+                if bad in text
+            ]
     if not hooks.is_file():
         problems.append("missing hooks/hooks.json")
     else:
         problems += verify_hooks_text(hooks.read_text(encoding="utf-8"))
+    shim = plugin_dir / "bin" / "zibbo"
+    if not shim.is_file():
+        problems.append("missing bin/zibbo resolver shim")
+    elif RESOLVER_MARKER not in shim.read_text(encoding="utf-8"):
+        problems.append("bin/zibbo is not the Zibbo resolver shim")
     return problems
 
 

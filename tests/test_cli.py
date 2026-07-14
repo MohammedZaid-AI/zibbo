@@ -195,6 +195,32 @@ def test_humanize_step_generic_and_special() -> None:
     assert cli.humanize_step("minified_json") == "Minified JSON"
     assert cli.humanize_step("format_pdf") == "Extracted PDF"
     assert cli.humanize_step("collapsed_blank_lines") == "Collapsed blank lines"
+    assert cli.humanize_step("removed_duplicate_blocks") == "Removed duplicate instruction block"
+    assert cli.humanize_step("removed_duplicate_list_items") == "Removed duplicate instructions"
+
+
+def test_toggle_helpers_target_prompt_feature() -> None:
+    assert cli._normalize_feature("prompt") == "prompt"
+    assert cli._normalize_feature("PROMPT") == "prompt"
+    assert cli._normalize_feature("nonsense") is None
+    assert cli._normalize_feature(None) is None
+    assert cli._toggle_path("enable", "prompt") == "/internal/enable?feature=prompt"
+    assert cli._toggle_path("disable", None) == "/internal/disable"
+
+
+def test_render_toggle_distinguishes_global_and_prompt() -> None:
+    both_on = {"optimization_enabled": True, "prompt_optimization_enabled": True}
+    assert cli._render_toggle(both_on, "prompt") == "Prompt optimization enabled."
+    assert cli._render_toggle(both_on, None) == "Optimization enabled."
+    prompt_off = {"optimization_enabled": True, "prompt_optimization_enabled": False}
+    assert cli._render_toggle(prompt_off, "prompt") == "Prompt optimization disabled."
+
+
+def test_parser_enable_disable_accept_feature() -> None:
+    parser = cli.build_parser()
+    assert parser.parse_args(["enable", "prompt"]).feature == "prompt"
+    assert parser.parse_args(["disable", "prompt"]).feature == "prompt"
+    assert parser.parse_args(["enable"]).feature is None
 
 
 def test_discover_prefers_explicit_then_env(monkeypatch: pytest.MonkeyPatch) -> None:

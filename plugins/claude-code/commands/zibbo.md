@@ -1,5 +1,5 @@
 ---
-description: Zibbo — dashboard, stats, doctor, explain, benchmark, logs, enable/disable, start
+description: Zibbo — activation dashboard (also /zibbo:stats, /zibbo:doctor, /zibbo:explain …)
 argument-hint: "[status|stats|doctor|explain|benchmark|logs|enable|disable|start]"
 allowed-tools: Bash(zibbo), Bash(zibbo *)
 ---
@@ -12,9 +12,13 @@ this command only displays it. With no argument it shows the activation dashboar
 !`zibbo $ARGUMENTS`
 
 Present the output above verbatim, in a fenced code block. Do not summarize, re-order, or
-invent numbers. If it reports the gateway is not reachable, run `/zibbo start`. If the
+invent numbers. If it reports the gateway is not reachable, run `/zibbo:start`. If the
 `zibbo` command was not found, tell the user to install it so Claude Code can see it:
 `pipx install git+https://github.com/MohammedZaid-AI/zibbo`.
+
+There are also per-action commands, so the user need not remember argument syntax:
+`/zibbo:stats`, `/zibbo:explain`, `/zibbo:doctor`, `/zibbo:benchmark`, `/zibbo:logs`,
+`/zibbo:enable`, `/zibbo:disable`, `/zibbo:claude`, `/zibbo:start`.
 
 Reminder to surface only when the gateway is **not** yet receiving this editor's traffic:
 Zibbo optimizes requests only when Claude Code's model endpoint is pointed at it. Set

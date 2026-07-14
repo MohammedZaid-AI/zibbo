@@ -42,9 +42,11 @@ from gateway.api.schemas.internal import (
     WindowStatsModel,
 )
 from gateway.claude_env import detect_auth, observed_auth, read_claude_settings
+from gateway.optimizers import apply_prompt_optimization
 
 if TYPE_CHECKING:
     from gateway.analytics.models import WindowStats
+    from gateway.runtime import RuntimeControl
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -72,6 +74,7 @@ async def status(
         uptime_seconds=round(time.monotonic() - state.started_at, 3),
         optimization_enabled=control.optimization_enabled,
         pipeline_active=control.optimization_enabled,
+        prompt_optimization_enabled=control.prompt_optimization_enabled,
         cache_enabled=cache.enabled,
         cache_backend=cache.backend_name,
         documents_enabled=state.documents.enabled,
@@ -183,13 +186,24 @@ async def logs(analytics: AnalyticsDep, limit: int = 20) -> LogsResponse:
 
 
 @router.post("/enable", response_model=ToggleResponse, summary="Enable transformations")
-async def enable(control: RuntimeControlDep) -> ToggleResponse:
-    return ToggleResponse(optimization_enabled=control.set_optimization_enabled(True))
+async def enable(request: Request, control: RuntimeControlDep) -> ToggleResponse:
+    """Turn optimization on. ``?feature=prompt`` targets just the prompt optimizer;
+    with no feature it flips the global kill switch."""
+    if _feature(request) == "prompt":
+        _set_prompt_optimization(request, control, enabled=True)
+    else:
+        control.set_optimization_enabled(True)
+    return _toggle_response(control)
 
 
 @router.post("/disable", response_model=ToggleResponse, summary="Disable transformations")
-async def disable(control: RuntimeControlDep) -> ToggleResponse:
-    return ToggleResponse(optimization_enabled=control.set_optimization_enabled(False))
+async def disable(request: Request, control: RuntimeControlDep) -> ToggleResponse:
+    """Turn optimization off. ``?feature=prompt`` targets just the prompt optimizer."""
+    if _feature(request) == "prompt":
+        _set_prompt_optimization(request, control, enabled=False)
+    else:
+        control.set_optimization_enabled(False)
+    return _toggle_response(control)
 
 
 @router.post("/benchmark", response_model=BenchmarkResponse, summary="Replay through the pipeline")
@@ -289,6 +303,18 @@ async def doctor(
             )
         )
 
+    prompt_on = control.prompt_optimization_enabled
+    checks.append(
+        DoctorCheck(
+            name="prompt optimizer",
+            status="ok" if prompt_on else "warn",
+            detail="enabled" if prompt_on else "disabled (long prompts pass through)",
+            fix=None
+            if prompt_on
+            else "run  zibbo enable prompt  (or set ZIBBO_PROMPT_OPTIMIZATION=true)",
+        )
+    )
+
     providers = [entry.provider.name for entry in request.app.state.mounted_providers]
     checks.append(
         DoctorCheck(
@@ -301,6 +327,38 @@ async def doctor(
 
     healthy = all(check.status != "fail" for check in checks)
     return DoctorResponse(healthy=healthy, checks=checks)
+
+
+# -- Feature toggles ---------------------------------------------------------
+
+
+def _feature(request: Request) -> str | None:
+    """The ``?feature=`` target of an enable/disable call, if any."""
+    value = request.query_params.get("feature")
+    return value.strip().lower() if value else None
+
+
+def _toggle_response(control: RuntimeControl) -> ToggleResponse:
+    return ToggleResponse(
+        optimization_enabled=control.optimization_enabled,
+        prompt_optimization_enabled=control.prompt_optimization_enabled,
+    )
+
+
+def _set_prompt_optimization(
+    request: Request, control: RuntimeControl, *, enabled: bool
+) -> None:
+    """Flip the prompt flag and bring the shared registry and detector into line.
+
+    The registry and detector live on ``app.state`` and are read from worker threads;
+    they are copy-on-write, so mutating them here on the event loop is safe. Doing both
+    in one place is what keeps detection and transformation from disagreeing.
+    """
+    control.set_prompt_optimization_enabled(enabled)
+    state = request.app.state
+    apply_prompt_optimization(
+        state.transformer_registry, state.detector, state.optimizer_options, enabled=enabled
+    )
 
 
 # -- Helpers -----------------------------------------------------------------

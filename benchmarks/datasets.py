@@ -330,3 +330,108 @@ def all_datasets() -> tuple[Dataset, ...]:
         json_api_response(),
         plain_text_notes(),
     )
+
+
+# -- Prompt corpora: long, human-written coding prompts with real redundancy ----
+#
+# These are what AI coding assistants actually receive: an instruction pasted twice, a
+# Requirements section copied and edited, the same constraint restated under two copies
+# of the same heading. The redundancy here is *exact* — the kind a deterministic
+# transformer can remove — not the semantic near-duplication a human might collapse.
+
+_CONSTRAINTS = [
+    "- Do not modify authentication.",
+    "- Do not modify the database schema.",
+    "- Do not change the public API.",
+    "- Return complete files, never placeholders.",
+    "- Keep existing tests passing.",
+]
+
+_RULES = [
+    "- Match the surrounding code style.",
+    "- Prefer standard library over new dependencies.",
+    "- Every change must be covered by a test.",
+    "- Never commit secrets or credentials.",
+]
+
+
+def coding_prompt_repeated_constraints() -> Dataset:
+    """A task with its constraint list restated several times, as a careful user does."""
+    body = ["Refactor the checkout service so it retries failed payment captures.", ""]
+    for _ in range(10):
+        body.append("Requirements:")
+        body.append("")
+        body.extend(_CONSTRAINTS)
+        body.append("")
+    return Dataset(
+        "coding_prompt_repeated_constraints",
+        "Coding task with a Requirements section repeated six times",
+        "\n".join(body),
+    )
+
+
+def coding_prompt_duplicate_sections() -> Dataset:
+    """A prompt assembled by pasting several stock sections, some of them twice."""
+    rng = _rng()
+    intro = _paragraph(rng, 4)
+    context = _paragraph(rng, 5)
+    sections = [
+        f"Fix the failing integration tests in the billing module.\n\n{intro}",
+        "Project rules:\n\n" + "\n".join(_RULES),
+        f"Context:\n\n{context}",
+        "Constraints:\n\n" + "\n".join(_CONSTRAINTS),
+        # The user pastes the rules and constraints a second time near the end.
+        "Project rules:\n\n" + "\n".join(_RULES),
+        "Constraints:\n\n" + "\n".join(_CONSTRAINTS),
+        f"Context:\n\n{context}",
+    ]
+    return Dataset(
+        "coding_prompt_duplicate_sections",
+        "Coding prompt with duplicate Project rules / Constraints / Context sections",
+        "\n\n".join(sections),
+    )
+
+
+def coding_prompt_with_code() -> Dataset:
+    """Repeated instructions surrounding a code block and a stack trace that must be
+    preserved byte-for-byte."""
+    rng = _rng()
+    trace = (
+        "Traceback (most recent call last):\n"
+        '  File "app/checkout.py", line 42, in capture\n'
+        "    charge = gateway.capture(order.id)\n"
+        '  File "app/gateway.py", line 88, in capture\n'
+        "    raise PaymentError(response.status)\n"
+        "PaymentError: 402"
+    )
+    code = (
+        "```python\n"
+        "def capture(order_id: str) -> Charge:\n"
+        "    return gateway.capture(order_id)\n"
+        "```"
+    )
+    parts = [
+        "Fix this bug. Return complete files. Do not use placeholders.",
+        "Here is the failing code:",
+        code,
+        "And the stack trace:",
+        trace,
+        _paragraph(rng, 6),
+        # A restated instruction block and the same constraints again.
+        "Fix this bug. Return complete files. Do not use placeholders.",
+        "Constraints:\n\n" + "\n".join(_CONSTRAINTS),
+        "Constraints:\n\n" + "\n".join(_CONSTRAINTS),
+    ]
+    return Dataset(
+        "coding_prompt_with_code",
+        "Coding prompt with a preserved code block, a stack trace, and repeated instructions",
+        "\n\n".join(parts),
+    )
+
+
+def prompt_datasets() -> tuple[Dataset, ...]:
+    return (
+        coding_prompt_repeated_constraints(),
+        coding_prompt_duplicate_sections(),
+        coding_prompt_with_code(),
+    )

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/avatar.png" alt="Zibbo" width="160" height="160" />
+
 # Zibbo
 
 ### Your AI coding assistant wastes tokens. Zibbo takes them back.
@@ -90,7 +92,7 @@ Then point Claude Code at the gateway:
 export ANTHROPIC_BASE_URL=http://localhost:8000/anthropic
 ```
 
-A hook launches the gateway for you. Type `/zibbo` to watch the savings roll in.
+A hook launches the gateway for you. Type `/zibbo:zibbo` to watch the savings roll in.
 
 ### Codex
 
@@ -156,6 +158,28 @@ Reproduce every number yourself: `zibbo benchmark --suite` · full method in [do
 
 ---
 
+## Optional: prompt de-duplication
+
+Long, hand-written coding prompts repeat themselves — the same instruction pasted twice,
+a `Requirements:` section copied and edited. Zibbo can strip that **exact** redundancy,
+deterministically, with no model in the loop. It removes exact-duplicate instruction
+blocks, repeated sections, and duplicate bullets under the same heading — and never
+paraphrases, reorders, or touches code, examples, or stack traces.
+
+It's **off by default**. Turn it on when you want it:
+
+```bash
+zibbo enable prompt      # live, no restart   (or set ZIBBO_PROMPT_OPTIMIZATION=true)
+zibbo disable prompt
+```
+
+Measured on realistic assistant prompts: **17–87% fewer tokens** depending on how
+repetitive the prompt is. Full behaviour and guarantees in
+[docs/PROMPT_OPTIMIZATION.md](docs/PROMPT_OPTIMIZATION.md); benchmark it with
+`python -m benchmarks.prompts`.
+
+---
+
 ## Commands
 
 ```bash
@@ -175,7 +199,8 @@ Try it on anything, no assistant required:
 zibbo benchmark --content "$(cat some-page.html)"
 ```
 
-Inside Claude Code, it's all there as `/zibbo`, `/zibbo stats`, `/zibbo doctor`.
+Inside Claude Code, it's all there as `/zibbo:zibbo`, `/zibbo:stats`, `/zibbo:doctor`
+(Claude Code namespaces plugin commands, so they start with `/zibbo:`).
 
 ---
 

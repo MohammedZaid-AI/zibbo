@@ -20,11 +20,14 @@ import threading
 class RuntimeControl:
     """Process-wide switches that outlive a single request but not the process."""
 
-    __slots__ = ("_lock", "_optimization_enabled")
+    __slots__ = ("_lock", "_optimization_enabled", "_prompt_optimization_enabled")
 
-    def __init__(self, *, optimization_enabled: bool) -> None:
+    def __init__(
+        self, *, optimization_enabled: bool, prompt_optimization_enabled: bool = False
+    ) -> None:
         self._lock = threading.Lock()
         self._optimization_enabled = optimization_enabled
+        self._prompt_optimization_enabled = prompt_optimization_enabled
 
     @property
     def optimization_enabled(self) -> bool:
@@ -36,3 +39,16 @@ class RuntimeControl:
         with self._lock:
             self._optimization_enabled = enabled
             return self._optimization_enabled
+
+    @property
+    def prompt_optimization_enabled(self) -> bool:
+        """Whether deterministic prompt de-duplication is active. Seeded from settings,
+        then owned here so ``zibbo enable/disable prompt`` takes effect without a
+        restart. The registry and detector are updated in lockstep with this flag."""
+        with self._lock:
+            return self._prompt_optimization_enabled
+
+    def set_prompt_optimization_enabled(self, enabled: bool) -> bool:
+        with self._lock:
+            self._prompt_optimization_enabled = enabled
+            return self._prompt_optimization_enabled

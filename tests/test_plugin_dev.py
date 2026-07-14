@@ -53,6 +53,30 @@ def test_repo_plugin_files_contain_no_shell_expansion() -> None:
     assert plugin_dev.verify_plugin_dir(PLUGIN_DIR) == []
 
 
+def test_per_action_command_files_exist_and_are_clean() -> None:
+    # Claude Code namespaces plugin commands as /zibbo:<file>, so each action ships as its
+    # own command file (/zibbo:stats, /zibbo:doctor, …) — discoverable, none to memorize.
+    commands = PLUGIN_DIR / "commands"
+    expected = {
+        "stats",
+        "explain",
+        "doctor",
+        "benchmark",
+        "logs",
+        "enable",
+        "disable",
+        "claude",
+        "start",
+    }
+    present = {path.stem for path in commands.glob("*.md")}
+    assert expected <= present, f"missing per-action commands: {expected - present}"
+    for action in expected:
+        text = (commands / f"{action}.md").read_text(encoding="utf-8")
+        assert f"!`zibbo {action} $ARGUMENTS`" in text  # wired to the right subcommand
+        for bad in plugin_dev.FORBIDDEN_COMMAND_SNIPPETS:
+            assert bad not in text  # no expansion the permission checker would reject
+
+
 def test_manifests_agree_on_version() -> None:
     """A version bump must touch both manifests, or the marketplace advertises a stale one."""
     plugin_version = plugin_dev.read_plugin_version(PLUGIN_DIR)

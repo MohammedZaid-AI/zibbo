@@ -1,3 +1,7 @@
+<div align="center">
+<img src="../../docs/assets/avatar.png" alt="Zibbo" width="120" height="120" />
+</div>
+
 # Zibbo for Codex
 
 The companion plugin for [Zibbo](https://github.com/MohammedZaid-AI/zibbo), the

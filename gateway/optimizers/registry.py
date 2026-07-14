@@ -29,10 +29,15 @@ class TransformerRegistry:
     def register(self, transformer: Transformer) -> None:
         if any(existing.name == transformer.name for existing in self._transformers):
             raise ConfigurationError(f"transformer {transformer.name!r} is already registered")
-        self._transformers.append(transformer)
-        # Sort by name as a tiebreaker so selection never depends on registration
-        # order — otherwise a reordered lifespan would change gateway behaviour.
-        self._transformers.sort(key=lambda item: (item.priority, item.name))
+        # Copy-on-write: build the new ordering, then swap the reference in one atomic
+        # assignment. A worker thread iterating ``select`` keeps the list it started
+        # with, so a runtime register/unregister (the prompt optimizer's enable/disable)
+        # never tears a concurrent read. Sort by (priority, name) so selection never
+        # depends on registration order.
+        ordered = sorted(
+            [*self._transformers, transformer], key=lambda item: (item.priority, item.name)
+        )
+        self._transformers = ordered
         logger.debug(
             "transformer_registered", transformer=transformer.name, priority=transformer.priority
         )

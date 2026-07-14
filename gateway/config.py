@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Self
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gateway import __version__
@@ -83,6 +83,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         frozen=True,
+        # So a field with an explicit env alias (prompt_optimization_enabled) can still be
+        # set by its Python name in tests and code, not only by the alias.
+        populate_by_name=True,
     )
 
     # -- Identity ----------------------------------------------------------
@@ -179,6 +182,34 @@ class Settings(BaseSettings):
 
     html_preserve_links: bool = True
     html_preserve_images: bool = True
+
+    # -- Prompt optimization ----------------------------------------------
+    # Deterministic de-duplication of long, human-written coding prompts: exact
+    # duplicate instruction blocks, repeated Requirements/Rules sections and repeated
+    # list items are removed, meaning untouched. Off by default and provider-agnostic;
+    # toggle live with `zibbo enable prompt` / `zibbo disable prompt`. Never rewrites,
+    # summarizes, reorders, or touches code. See docs/PROMPT_OPTIMIZATION.md.
+    # The spec's variable is ZIBBO_PROMPT_OPTIMIZATION; the conventional _ENABLED suffix
+    # is accepted too. An explicit alias bypasses env_prefix, so both are spelled in full.
+    prompt_optimization_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "ZIBBO_PROMPT_OPTIMIZATION", "ZIBBO_PROMPT_OPTIMIZATION_ENABLED"
+        ),
+    )
+
+    prompt_optimization_min_chars: Annotated[int, Field(ge=0)] = 240
+    """Prose shorter than this is left to the plain-text transformer. Sized to admit a
+    realistic coding prompt — roughly two copies of a short instruction block plus context
+    — because that is exactly the content the prompt optimizer exists to de-duplicate. The
+    real guard against reshaping ordinary prose is ``min_duplicate_ratio`` (a meaningful
+    fraction of lines must be exact duplicates), not length; 1500 was high enough that the
+    optimizer never fired on the coding prompts it was built for. Lowering it changes only
+    detection sensitivity — determinism, idempotency and never-grow are unaffected."""
+
+    prompt_optimization_min_duplicate_ratio: Annotated[float, Field(ge=0.0, le=1.0)] = 0.15
+    """Fraction of non-blank lines that must be exact duplicates before content is
+    classified as an optimizable prompt rather than ordinary prose."""
 
     # -- Documents ---------------------------------------------------------
     # Uploaded documents (PDF, DOCX, CSV, XML, HTML, Markdown) embedded as base64 in

@@ -51,10 +51,45 @@ async def test_version_and_stats_and_logs(client: AsyncClient) -> None:
 
 @pytest.mark.integration
 async def test_enable_disable_roundtrip(client: AsyncClient) -> None:
-    assert (await client.post("/internal/disable")).json() == {"optimization_enabled": False}
+    assert (await client.post("/internal/disable")).json()["optimization_enabled"] is False
     assert (await client.get("/internal/status")).json()["optimization_enabled"] is False
-    assert (await client.post("/internal/enable")).json() == {"optimization_enabled": True}
+    assert (await client.post("/internal/enable")).json()["optimization_enabled"] is True
     assert (await client.get("/internal/status")).json()["optimization_enabled"] is True
+
+
+@pytest.mark.integration
+async def test_prompt_optimization_toggle(client: AsyncClient) -> None:
+    """`?feature=prompt` flips just the prompt optimizer, live, without a restart, and
+    registers/unregisters its transformer so /status reflects reality."""
+    status = (await client.get("/internal/status")).json()
+    assert status["prompt_optimization_enabled"] is False
+    assert "prompt" not in status["transformers"]
+
+    enabled = (await client.post("/internal/enable?feature=prompt")).json()
+    assert enabled["prompt_optimization_enabled"] is True
+    # The global switch is untouched by a feature-scoped enable.
+    assert enabled["optimization_enabled"] is True
+
+    status = (await client.get("/internal/status")).json()
+    assert status["prompt_optimization_enabled"] is True
+    assert "prompt" in status["transformers"]
+
+    disabled = (await client.post("/internal/disable?feature=prompt")).json()
+    assert disabled["prompt_optimization_enabled"] is False
+    status = (await client.get("/internal/status")).json()
+    assert "prompt" not in status["transformers"]
+
+
+@pytest.mark.integration
+async def test_prompt_optimizer_starts_enabled_when_configured() -> None:
+    settings = build_settings(prompt_optimization_enabled=True)
+    async for http in _client(settings, client_addr=("127.0.0.1", 5000)):
+        status = (await http.get("/internal/status")).json()
+        assert status["prompt_optimization_enabled"] is True
+        assert "prompt" in status["transformers"]
+        doctor = (await http.post("/internal/doctor")).json()
+        prompt_check = next(c for c in doctor["checks"] if c["name"] == "prompt optimizer")
+        assert prompt_check["status"] == "ok"
 
 
 @pytest.mark.integration

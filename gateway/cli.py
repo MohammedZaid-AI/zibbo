@@ -291,7 +291,7 @@ def render_banner(banner: dict[str, Any]) -> str:
         ),
     ]
     if routed:
-        lines += ["", "  Type  /zibbo  for details."]
+        lines += ["", "  Try  /zibbo:zibbo  (dashboard)  ·  /zibbo:stats  ·  /zibbo:doctor"]
     else:
         lines += _routing_help(eff_auth, routing)
     return "\n".join(lines)
@@ -515,6 +515,9 @@ _STEP_LABELS = {
     "collapsed_blank_lines": "Collapsed blank lines",
     "collapsed_inline_whitespace": "Collapsed duplicated whitespace",
     "removed_duplicate_paragraphs": "Removed duplicated paragraphs",
+    "removed_duplicate_list_items": "Removed duplicate instructions",
+    "removed_duplicate_blocks": "Removed duplicate instruction block",
+    "removed_duplicate_sentences": "Removed repeated sentence",
     "extracted_document": "Extracted document to Markdown",
 }
 _ACRONYMS = {
@@ -809,6 +812,17 @@ def _build_doctor_checks(client: Client) -> list[dict[str, Any]]:
                 fix=None if transformers else "check the gateway build",
             )
         )
+        prompt_on = status.get("prompt_optimization_enabled", False)
+        checks.append(
+            _check(
+                "prompt optimizer",
+                "ok" if prompt_on else "warn",
+                "enabled" if prompt_on else "disabled",
+                problem=None if prompt_on else "deterministic prompt de-duplication is off",
+                reason=None if prompt_on else "long, repetitive prompts pass through unshrunk",
+                fix=None if prompt_on else "run  zibbo enable prompt",
+            )
+        )
         checks.append(_check("port", "ok", f"gateway on {client.base_url}"))
 
     if claude is not None:
@@ -950,16 +964,39 @@ def _run_suite(args: argparse.Namespace) -> int:
         return 2
 
 
-def _cmd_enable(client: Client, _args: argparse.Namespace) -> int:
-    data = client.post("/internal/enable")
-    print(f"Optimization {'enabled' if data['optimization_enabled'] else 'disabled'}.")
+def _toggle_path(action: str, feature: str | None) -> str:
+    path = f"/internal/{action}"
+    if feature:
+        path += f"?feature={feature}"
+    return path
+
+
+def _render_toggle(data: dict[str, Any], feature: str | None) -> str:
+    if feature == "prompt":
+        state = "enabled" if data.get("prompt_optimization_enabled") else "disabled"
+        return f"Prompt optimization {state}."
+    return f"Optimization {'enabled' if data['optimization_enabled'] else 'disabled'}."
+
+
+def _cmd_enable(client: Client, args: argparse.Namespace) -> int:
+    feature = _normalize_feature(getattr(args, "feature", None))
+    data = client.post(_toggle_path("enable", feature))
+    print(_render_toggle(data, feature))
     return 0
 
 
-def _cmd_disable(client: Client, _args: argparse.Namespace) -> int:
-    data = client.post("/internal/disable")
-    print(f"Optimization {'enabled' if data['optimization_enabled'] else 'disabled'}.")
+def _cmd_disable(client: Client, args: argparse.Namespace) -> int:
+    feature = _normalize_feature(getattr(args, "feature", None))
+    data = client.post(_toggle_path("disable", feature))
+    print(_render_toggle(data, feature))
     return 0
+
+
+def _normalize_feature(feature: str | None) -> str | None:
+    """Only ``prompt`` is a per-feature target today; anything else is the global switch."""
+    if feature and feature.strip().lower() == "prompt":
+        return "prompt"
+    return None
 
 
 def _cmd_logs(client: Client, args: argparse.Namespace) -> int:
@@ -1185,8 +1222,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("claude", help="Claude Code activation status (gateway view)")
     sub.add_parser("stats", help="optimization statistics")
     sub.add_parser("doctor", help="run diagnostics")
-    sub.add_parser("enable", help="enable transformations")
-    sub.add_parser("disable", help="disable transformations")
+    enable = sub.add_parser("enable", help="enable transformations (or a feature: prompt)")
+    enable.add_argument("feature", nargs="?", help="feature to enable, e.g. prompt")
+    disable = sub.add_parser("disable", help="disable transformations (or a feature: prompt)")
+    disable.add_argument("feature", nargs="?", help="feature to disable, e.g. prompt")
     sub.add_parser("version", help="gateway and API version")
 
     bench = sub.add_parser("benchmark", help="replay through the pipeline (no upstream call)")

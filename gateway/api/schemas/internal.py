@@ -32,6 +32,7 @@ class StatusResponse(_Frozen):
     uptime_seconds: float
     optimization_enabled: bool
     pipeline_active: bool
+    prompt_optimization_enabled: bool
     cache_enabled: bool
     cache_backend: str
     documents_enabled: bool
@@ -95,6 +96,7 @@ class BenchmarkResponse(_Frozen):
 
 class ToggleResponse(_Frozen):
     optimization_enabled: bool
+    prompt_optimization_enabled: bool
 
 
 class DoctorCheck(_Frozen):

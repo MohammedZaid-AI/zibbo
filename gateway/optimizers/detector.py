@@ -258,6 +258,76 @@ class PlainTextSniffer:
         return Detection(ContentType.TEXT, 0.1, self.name)
 
 
+# A line that reads as source code, a log record, or a stack-trace frame. Prompts that
+# are *mostly* these are pastes to be preserved verbatim, not prose to de-duplicate.
+_CODE_OR_LOG_RE: Final = re.compile(
+    r"""
+    ^\s*(?:
+        at\s+\S+                               # java/js stack frame
+      | File\s+"[^"]+",\s+line\s+\d+           # python traceback frame
+      | Traceback\s+\(most\s+recent\s+call     # python traceback header
+      | (?:ERROR|WARN|WARNING|INFO|DEBUG|TRACE|FATAL)\b   # log level
+      | \d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}       # iso timestamp prefix
+      | (?:import|from|def|class|function|const|let|var|public|private|return|if|for|while)\b
+      | [#@}/*]                                # comment / decorator / brace / path lines
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+class PromptSniffer:
+    """Classify long, duplicate-heavy prose/Markdown as an optimizable PROMPT.
+
+    Only fires when prompt optimization is enabled *and* the content clears two gates:
+    it is long enough that de-duplication is worth the work, and a meaningful fraction
+    of its lines are exact duplicates. Structural formats (JSON, HTML, XML) are already
+    claimed at higher confidence by their own sniffers, so this never overrides them;
+    and content that reads as code, logs or a stack trace is refused outright, because
+    those are pastes to forward untouched, never prompts to reshape.
+
+    The confidence (0.8) sits above the detector's trust threshold but below the
+    structural sniffers, so PROMPT wins over plain text and loses to real markup.
+    """
+
+    name: ClassVar[str] = "prompt-structure"
+
+    def __init__(self, *, min_chars: int, min_duplicate_ratio: float) -> None:
+        self._min_chars = min_chars
+        self._min_duplicate_ratio = min_duplicate_ratio
+
+    def sniff(self, content: str) -> Detection | None:
+        if len(content) < self._min_chars:
+            return None
+
+        non_blank = [line for line in content.splitlines() if line.strip()]
+        if len(non_blank) < 2:
+            return None
+
+        code_or_log = sum(1 for line in non_blank if _CODE_OR_LOG_RE.match(line))
+        if code_or_log / len(non_blank) > 0.6:
+            return None
+
+        seen: set[str] = set()
+        duplicates = 0
+        for line in non_blank:
+            key = line.strip()
+            if key in seen:
+                duplicates += 1
+            else:
+                seen.add(key)
+        ratio = duplicates / len(non_blank)
+        if ratio < self._min_duplicate_ratio:
+            return None
+
+        return Detection(
+            ContentType.PROMPT,
+            0.8,
+            self.name,
+            metadata={"duplicate_ratio": round(ratio, 3), "lines": len(non_blank)},
+        )
+
+
 def default_sniffers() -> tuple[Sniffer, ...]:
     return (
         MagicBytesSniffer(),
@@ -285,14 +355,18 @@ class ContentDetector:
         return tuple(self._sniffers)
 
     def add_sniffer(self, sniffer: Sniffer) -> None:
-        """Register a sniffer contributed by a plugin.
+        """Register a sniffer contributed by a plugin (or the runtime prompt toggle).
 
         Order does not matter — ``detect`` takes the highest confidence, not the
-        first match — so a new sniffer is simply appended.
+        first match — so a new sniffer is simply appended. Copy-on-write, so adding one
+        at runtime never tears a ``detect`` iterating in a worker thread.
         """
         if any(existing.name == sniffer.name for existing in self._sniffers):
             raise ValueError(f"sniffer {sniffer.name!r} is already registered")
-        self._sniffers.append(sniffer)
+        self._sniffers = [*self._sniffers, sniffer]
+
+    def has_sniffer(self, name: str) -> bool:
+        return any(existing.name == name for existing in self._sniffers)
 
     def remove_sniffer(self, name: str) -> None:
         """Remove a sniffer. Idempotent, so a rollback can call it blindly."""

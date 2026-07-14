@@ -46,10 +46,34 @@ class HtmlOptions:
 
 
 @dataclass(frozen=True, slots=True)
+class PromptOptions:
+    """Deterministic prompt de-duplication. Off by default — a long prompt with genuine
+    structure must never be reshaped without the operator asking for it."""
+
+    enabled: bool = False
+    """When false the PROMPT content type is never detected: long prose is handled by
+    the plain-text transformer exactly as before."""
+
+    min_chars: int = 240
+    """Below this the content is left to the plain-text transformer. Low enough to admit a
+    realistic coding prompt (about two copies of a short instruction block); the real guard
+    against reshaping ordinary prose is ``min_duplicate_ratio``, not length."""
+
+    min_duplicate_ratio: float = 0.15
+    """Fraction of non-blank lines that must be exact duplicates before the content is
+    classified PROMPT. Keeps ordinary prose out of the prompt path."""
+
+    text: TextOptions = field(default_factory=TextOptions)
+    """The prompt transformer finishes with the shared normalizer, so its output is a
+    fixed point of the text transformer and the pipeline stays idempotent."""
+
+
+@dataclass(frozen=True, slots=True)
 class OptimizerOptions:
     text: TextOptions = field(default_factory=TextOptions)
     json: JsonOptions = field(default_factory=JsonOptions)
     html: HtmlOptions = field(default_factory=HtmlOptions)
+    prompt: PromptOptions = field(default_factory=PromptOptions)
     min_segment_chars: int = 0
 
     @classmethod
@@ -67,6 +91,12 @@ class OptimizerOptions:
                 # The HTML transformer finishes by running its Markdown through the
                 # same normalizer the text transformer uses. Sharing the options is
                 # what makes pipeline(pipeline(x)) == pipeline(x) hold.
+                text=text,
+            ),
+            prompt=PromptOptions(
+                enabled=settings.prompt_optimization_enabled,
+                min_chars=settings.prompt_optimization_min_chars,
+                min_duplicate_ratio=settings.prompt_optimization_min_duplicate_ratio,
                 text=text,
             ),
             min_segment_chars=settings.optimization_min_segment_chars,

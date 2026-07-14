@@ -25,6 +25,10 @@ class ContentType(StrEnum):
     XML = "xml"
     CSV = "csv"
     TEXT = "text"
+    PROMPT = "prompt"
+    """Long, human-written prose/Markdown with enough exact-duplicate structure to be
+    worth de-duplicating. A refinement of TEXT, detected only when prompt optimization
+    is enabled; see ``transformers/prompt.py``."""
     PDF = "pdf"
     DOCX = "docx"
     IMAGE = "image"
