@@ -248,5 +248,4 @@ Want the internals — providers, transformers, caching, plugins?
 ### Spend your tokens on answers, not noise.
 
 [Install](#install) · [Benchmarks](docs/BENCHMARKS.md) · [Docs](docs/) · [Star on GitHub ⭐](https://github.com/MohammedZaid-AI/zibbo)
-
 </div>
