@@ -3,7 +3,6 @@
 <img src="docs/assets/avatar.png" alt="Zibbo" width="160" height="160" />
 
 # Zibbo
-
 ### Your AI coding assistant wastes tokens. Zibbo takes them back.
 
 Claude Code, Codex, and Gemini CLI send raw HTML, logs, JSON, and PDFs straight
