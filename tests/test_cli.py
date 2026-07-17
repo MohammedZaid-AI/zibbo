@@ -436,6 +436,80 @@ def test_dashboard_prefers_observed_reality_over_env_intent() -> None:
     assert "The only missing step is routing" not in out
 
 
+def _dashboard(transformers: list[str]) -> str:
+    return cli.render_dashboard(
+        {
+            "gateway": {"version": "0.1.0", "environment": "development"},
+            "provider": "Anthropic",
+            "auth": _auth(configured=_CFG_SUBSCRIPTION, observed=_OBS_API_KEY),
+            "routing": _routing(configured=True, observed=True),
+            "stats": _stats(),
+            "optimization_enabled": True,
+            "cache": {"enabled": True, "backend": "memory"},
+            "transformers": transformers,
+        }
+    )
+
+
+def test_dashboard_lists_registered_transformers_and_marks_prompt_disabled() -> None:
+    # Prompt off: the registry the gateway reports has no `prompt`, so the dashboard
+    # shows it explicitly as disabled rather than silently omitting it.
+    off = _dashboard(["html", "json", "text"])
+    assert "Transformers" in off
+    for name in ("html", "json", "text"):
+        assert name in off
+    assert "prompt (disabled)" in off
+
+
+def test_dashboard_shows_prompt_active_when_registered() -> None:
+    # Prompt on: it is in the registry the gateway reports, so it renders as active with
+    # no "disabled" marker. This is what proves the list mirrors the runtime registry.
+    on = _dashboard(["html", "json", "prompt", "text"])
+    assert "prompt" in on
+    assert "prompt (disabled)" not in on
+
+
+class _FakeDoctorClient:
+    """A stand-in for the HTTP client so `_build_doctor_checks` can run without a socket.
+
+    Returns a chosen `/internal/status` and refuses `/internal/claude` (its checks are not
+    under test), exactly as an unreachable-claude gateway would.
+    """
+
+    base_url = "http://127.0.0.1:8000"
+
+    def __init__(self, status: dict[str, object]) -> None:
+        self._status = status
+
+    def reachable(self) -> bool:
+        return True
+
+    def get(self, path: str) -> object:
+        if path == "/internal/status":
+            return self._status
+        raise cli.GatewayError("not available")
+
+
+def _prompt_doctor_check(*, prompt_on: bool, transformers: list[str]) -> dict[str, object]:
+    status = {**_STATUS, "prompt_optimization_enabled": prompt_on, "transformers": transformers}
+    checks = cli._build_doctor_checks(_FakeDoctorClient(status))  # type: ignore[arg-type]
+    return next(check for check in checks if check["name"] == "prompt optimizer")
+
+
+def test_doctor_prompt_check_reflects_registry_and_names_the_env_var() -> None:
+    off = _prompt_doctor_check(prompt_on=False, transformers=["html", "json", "text"])
+    assert off["status"] == "warn"
+    assert off["detail"] == "disabled"
+    # Requirement: the reason must name the actual cause, and the fix both enable methods.
+    assert "ZIBBO_PROMPT_OPTIMIZATION=false" in str(off["reason"])
+    assert "ZIBBO_PROMPT_OPTIMIZATION=true" in str(off["fix"])
+    assert "zibbo enable prompt" in str(off["fix"])
+
+    on = _prompt_doctor_check(prompt_on=True, transformers=["html", "json", "prompt", "text"])
+    assert on["status"] == "ok"
+    assert on["detail"] == "enabled"
+
+
 def test_render_doctor_shows_problem_reason_fix() -> None:
     out = cli.render_doctor(
         {

@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import gateway
-from gateway import plugin_dev
+from gateway import lifecycle, plugin_dev
 from gateway.claude_env import detect_auth, detect_routing, read_claude_settings
 
 if TYPE_CHECKING:
@@ -297,6 +297,26 @@ def render_banner(banner: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# The only transformer that can be registered or not at runtime today. Listed so its
+# *absence* from the registry is shown explicitly, rather than silently missing.
+_OPTIONAL_TRANSFORMERS = ("prompt",)
+
+
+def _transformer_lines(active: list[str]) -> list[str]:
+    """A ✓ for every registered transformer, and a ✗ for a known-optional one that is off.
+
+    ``active`` is the gateway's live registry (``/internal/status`` -> ``transformers``),
+    so this reflects what would actually run, not a hardcoded list.
+    """
+    lines = ["", "  Transformers"]
+    for name in active:
+        lines.append(f"      {_TICK} {name}")
+    for name in _OPTIONAL_TRANSFORMERS:
+        if name not in active:
+            lines.append(f"      {_CROSS} {name} (disabled)")
+    return lines
+
+
 def render_dashboard(dash: dict[str, Any]) -> str:
     """The ``/zibbo`` / ``zibbo status`` dashboard: configured intent vs observed reality."""
     gateway = dash["gateway"]
@@ -318,6 +338,7 @@ def render_dashboard(dash: dict[str, Any]) -> str:
     ]
     lines = ["Zibbo", ""]
     lines += [f"  {label:<20}{value}" for label, value in rows]
+    lines += _transformer_lines(dash.get("transformers", []))
 
     # Routing: configuration (this shell's intent) beside observation (the gateway's
     # reality). Showing both is what exposes an environment mismatch at a glance.
@@ -326,6 +347,15 @@ def render_dashboard(dash: dict[str, Any]) -> str:
     lines += ["", "  Routing"]
     lines.append(_sub_flag(configured, "Configured", "Yes" if configured else "No"))
     lines.append(_sub_flag(observed, "Observed", "Active" if observed else "none yet"))
+
+    # Endpoint: the concrete URL Claude Code is (or will be) pointed at, and whether that is
+    # the Zibbo gateway or the provider directly. Reflects the persisted settings file.
+    endpoint = dash.get("endpoint", "https://api.anthropic.com")
+    cc_configured = bool(dash.get("cc_configured", False))
+    lines += ["", "  Endpoint"]
+    cc_label = "Configured" if cc_configured else "Default"
+    lines.append(_sub_flag(cc_configured, "Claude Code", cc_label))
+    lines.append(f"      {_DOT} {'Current':<12}{endpoint}")
 
     lines += ["", "  Authentication"]
     cfg = auth["configured"]
@@ -679,6 +709,13 @@ def _cmd_status(client: Client, _args: argparse.Namespace) -> int:
     providers = status.get("providers", [])
     routed = _effective_routed(view["routing"])
     provider = "Anthropic" if routed else (", ".join(p["name"] for p in providers) or "none")
+    # The persisted routing intent (what Claude Code will use next launch) is the settings
+    # file, not this shell's env — so status reflects reality across restarts.
+    persisted = lifecycle.persisted_base_url()
+    gateway_route = lifecycle.desired_base_url(client.base_url)
+    env_base = os.environ.get("ANTHROPIC_BASE_URL")
+    current_endpoint = persisted or env_base or lifecycle.DIRECT_ENDPOINT
+    cc_configured = current_endpoint.rstrip("/") == gateway_route.rstrip("/")
     dash = {
         "gateway": {"version": status["version"], "environment": status["environment"]},
         "provider": provider,
@@ -687,6 +724,9 @@ def _cmd_status(client: Client, _args: argparse.Namespace) -> int:
         "stats": stats_today,
         "optimization_enabled": status["optimization_enabled"],
         "cache": {"enabled": status["cache_enabled"], "backend": status["cache_backend"]},
+        "transformers": status.get("transformers", []),
+        "endpoint": current_endpoint,
+        "cc_configured": cc_configured,
     }
     print(render_dashboard(dash))
     return 0
@@ -819,8 +859,11 @@ def _build_doctor_checks(client: Client) -> list[dict[str, Any]]:
                 "ok" if prompt_on else "warn",
                 "enabled" if prompt_on else "disabled",
                 problem=None if prompt_on else "deterministic prompt de-duplication is off",
-                reason=None if prompt_on else "long, repetitive prompts pass through unshrunk",
-                fix=None if prompt_on else "run  zibbo enable prompt",
+                reason=None if prompt_on else "ZIBBO_PROMPT_OPTIMIZATION=false (the default)",
+                fix=None
+                if prompt_on
+                else "set ZIBBO_PROMPT_OPTIMIZATION=true (persists across restarts), "
+                "or run  zibbo enable prompt  (this session only)",
             )
         )
         checks.append(_check("port", "ok", f"gateway on {client.base_url}"))
@@ -1166,7 +1209,7 @@ def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
         )
     else:
         start_new_session = True
-    subprocess.Popen(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "gateway"],
         env=env,
         stdout=subprocess.DEVNULL,
@@ -1178,6 +1221,9 @@ def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
     for _ in range(50):  # up to ~10s
         time.sleep(0.2)
         if client.reachable():
+            # Record the PID we own so `zibbo stop` can terminate this exact process — and
+            # only this one. A gateway started another way leaves no PID file and is untouched.
+            lifecycle.write_pidfile(proc.pid, client.base_url)
             if announce:
                 print(f"{_TICK} Zibbo running at {client.base_url}")
             return 0
@@ -1186,7 +1232,70 @@ def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
 
 
 def _cmd_start(client: Client, args: argparse.Namespace) -> int:
-    return _start_gateway(client, port=args.port, announce=True)
+    """Bring the gateway up *and* route Claude Code through it, transactionally.
+
+    Config is written only after the gateway answers its health check, so a failed startup
+    never leaves Claude Code pointed at a dead endpoint. If the config write itself fails,
+    a gateway we started this call is stopped again — everything succeeds or nothing persists.
+    """
+    was_running = client.reachable()
+    rc = _start_gateway(client, port=args.port, announce=False)
+    if rc != 0:
+        return rc  # startup failed/timed out — settings untouched, nothing to roll back
+    started_now = not was_running
+
+    try:
+        result = lifecycle.configure_routing(lifecycle.desired_base_url(client.base_url))
+    except lifecycle.SettingsError as exc:
+        if started_now:
+            lifecycle.stop_gateway(client.reachable)  # roll back the process we just started
+        print(f"{_CROSS} could not configure Claude Code: {exc}", file=sys.stderr)
+        print("    Gateway not left routed. Fix the settings file and retry.", file=sys.stderr)
+        return 1
+
+    print(f"{_TICK} Gateway started ({client.base_url})")
+    if result.already_routed:
+        print(f"{_TICK} Claude Code already configured")
+    else:
+        print(f"{_TICK} Claude Code configured  ({result.settings_path})")
+    print()
+    print("  Restart Claude Code for routing to take effect.")
+    return 0
+
+
+def _cmd_stop(client: Client, _args: argparse.Namespace) -> int:
+    """Stop the gateway we started and restore Claude Code's previous endpoint.
+
+    Config is always restored, even if the process could not be stopped, so Claude Code is
+    never left pointing at a gateway that is going away.
+    """
+    stop = lifecycle.stop_gateway(client.reachable)
+
+    try:
+        restore = lifecycle.restore_routing()
+    except lifecycle.SettingsError as exc:
+        print(f"{_CROSS} could not restore Claude Code settings: {exc}", file=sys.stderr)
+        return 1
+
+    if stop.outcome == "stopped":
+        print(f"{_TICK} Gateway stopped")
+    elif stop.outcome == "not_running":
+        print(f"{_TICK} Gateway already stopped")
+    elif stop.outcome == "not_owned":
+        print(f"{_WARN} Gateway is running but was not started by  zibbo start")
+        print("       Stop it where you launched it (uvicorn / docker / another shell).")
+    else:  # stop_timeout
+        print(f"{_WARN} Gateway did not stop in time; check for a lingering process")
+
+    if restore.restored_to:
+        print(f"{_TICK} Claude Code restored  (ANTHROPIC_BASE_URL -> {restore.restored_to})")
+    elif restore.changed:
+        print(f"{_TICK} Claude Code restored  (removed Zibbo routing)")
+    else:
+        print(f"{_TICK} Claude Code already on the default endpoint")
+    print()
+    print("  Restart Claude Code to return to the normal endpoint.")
+    return 0
 
 
 _COMMANDS = {
@@ -1203,6 +1312,7 @@ _COMMANDS = {
     "plugin": _cmd_plugin,
     "version": _cmd_version,
     "start": _cmd_start,
+    "stop": _cmd_stop,
 }
 
 
@@ -1259,8 +1369,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plugin.add_argument("--plugin-dir", help="path to plugins/claude-code (default: this checkout)")
 
-    start = sub.add_parser("start", help="start the gateway if it is not already running")
+    start = sub.add_parser(
+        "start", help="start the gateway and route Claude Code through it"
+    )
     start.add_argument("--port", type=int, help="port to start on (sets ZIBBO_PORT)")
+
+    sub.add_parser("stop", help="stop the gateway and restore Claude Code's endpoint")
 
     return parser
 

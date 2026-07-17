@@ -186,6 +186,27 @@ async def test_prompt_optimization_toggles_at_runtime() -> None:
         assert gw.upstream_content().count("Requirements:") == 3
 
 
+# -- Observability: status reflects the live registry ------------------------
+
+
+async def test_status_transformers_mirror_the_live_registry() -> None:
+    """`/internal/status` (what `zibbo status`/`zibbo doctor` read) must report the actual
+    registry, so enabling the prompt optimizer is visible without a restart. This is the
+    guard against the observability gap: the reported list is the registry, not a constant."""
+    async with gateway() as gw:  # prompt off by default
+        status = (await gw.http.get("/internal/status")).json()
+        assert status["transformers"] == list(gw.app.state.transformer_registry.names)
+        assert "prompt" not in status["transformers"]
+        assert status["prompt_optimization_enabled"] is False
+
+        await gw.set_prompt(on=True)
+
+        status = (await gw.http.get("/internal/status")).json()
+        assert status["transformers"] == list(gw.app.state.transformer_registry.names)
+        assert "prompt" in status["transformers"]
+        assert status["prompt_optimization_enabled"] is True
+
+
 # -- Cache correctness -------------------------------------------------------
 
 
