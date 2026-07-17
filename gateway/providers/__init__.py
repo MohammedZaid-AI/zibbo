@@ -10,7 +10,7 @@ from gateway.providers.anthropic import AnthropicProvider
 from gateway.providers.auth import ApiKeyHeaderAuth, AuthStrategy, BearerAuth, NoAuth
 from gateway.providers.base import Provider, UpstreamRequest, parse_json_object
 from gateway.providers.openai import OpenAICompatibleProvider, OpenAIProvider
-from gateway.providers.proxy import ProxyService
+from gateway.providers.proxy import ProxyMetrics, ProxyMetricsSnapshot, ProxyService
 from gateway.providers.registry import ProviderRegistry
 
 __all__ = [
@@ -23,6 +23,8 @@ __all__ = [
     "OpenAIProvider",
     "Provider",
     "ProviderRegistry",
+    "ProxyMetrics",
+    "ProxyMetricsSnapshot",
     "ProxyService",
     "UpstreamRequest",
     "parse_json_object",

@@ -283,6 +283,82 @@ async def test_failure_before_headers_raises_a_gateway_error(
             )
 
 
+# -- Stale keepalive connection: the intermittent-502 case -----------------
+
+
+def _counting_client(
+    responses: list[Exception | httpx.Response],
+) -> tuple[AsyncClient, list[int]]:
+    """A client whose handler yields ``responses`` in order, counting each send."""
+    calls = [0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        index = calls[0]
+        calls[0] += 1
+        outcome = responses[min(index, len(responses) - 1)]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return AsyncClient(transport=httpx.MockTransport(handler)), calls
+
+
+async def _forward_stream(client: AsyncClient) -> StreamingResponse:
+    response = await ProxyService(client).forward(
+        provider=OpenAIProvider(base_url=UPSTREAM),
+        method="POST",
+        path="chat/completions",
+        query="",
+        headers={"content-type": "application/json"},
+        body=STREAM_BODY,
+    )
+    assert isinstance(response, StreamingResponse)
+    return response
+
+
+async def test_a_dropped_keepalive_connection_is_retried_and_succeeds() -> None:
+    """The exact intermittent 502: a pooled socket the server had already closed.
+
+    httpx raises before a byte is sent, so re-sending cannot double-submit. The
+    caller must see the real 200 stream, not a gateway 502.
+    """
+    stream = TrackedStream(list(CHUNKS))
+    ok = httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=stream)
+    client, calls = _counting_client(
+        [httpx.RemoteProtocolError("Server disconnected without sending a response"), ok]
+    )
+
+    response = await _forward_stream(client)
+    received = [chunk async for chunk in response.body_iterator]
+
+    assert b"".join(received) == b"".join(CHUNKS)  # type: ignore[arg-type]
+    assert calls[0] == 2, "the send should have been retried exactly once"
+    await client.aclose()
+
+
+async def test_reconnect_attempts_are_bounded() -> None:
+    """A provider that is genuinely down still fails — retries do not loop forever."""
+    client, calls = _counting_client([httpx.RemoteProtocolError("still gone")])
+
+    with pytest.raises(UpstreamError):
+        await _forward_stream(client)
+
+    # default reconnect_attempts=1 → one original send plus one retry
+    assert calls[0] == 2
+    await client.aclose()
+
+
+async def test_a_timeout_is_never_retried() -> None:
+    """A slow server may still be processing; retrying could double-submit."""
+    client, calls = _counting_client([httpx.ConnectTimeout("timed out")])
+
+    with pytest.raises(UpstreamTimeoutError):
+        await _forward_stream(client)
+
+    assert calls[0] == 1, "timeouts must not be retried"
+    await client.aclose()
+
+
 async def test_partial_chunk_delivery_is_relayed_verbatim() -> None:
     """SSE framing may split across TCP reads. The gateway must not reframe."""
     halves = [b'data: {"choices":[{"delta":', b'{"content":"x"}}]}\n\n', b"data: [DONE]\n\n"]

@@ -48,6 +48,7 @@ from gateway.providers import (
     OpenAICompatibleProvider,
     OpenAIProvider,
     ProviderRegistry,
+    ProxyMetrics,
     ProxyService,
 )
 from gateway.runtime import RuntimeControl
@@ -88,6 +89,11 @@ def build_upstream_client(settings: Settings) -> httpx.AsyncClient:
         limits=httpx.Limits(
             max_connections=settings.upstream_max_connections,
             max_keepalive_connections=settings.upstream_max_keepalive_connections,
+            # Drop idle connections on *our* clock, before the provider silently does.
+            # The lower this is relative to the provider's idle timeout, the fewer
+            # stale-socket races reach the retry path. See docs — Cloudflare (in front
+            # of Anthropic) closes idle connections aggressively.
+            keepalive_expiry=settings.upstream_keepalive_expiry_seconds,
         ),
         follow_redirects=False,
     )
@@ -177,7 +183,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.started_at = time.monotonic()
     app.state.health = HealthRegistry(timeout_seconds=settings.health_check_timeout_seconds)
     app.state.upstream_client = build_upstream_client(settings)
-    app.state.proxy = ProxyService(app.state.upstream_client)
+    app.state.proxy_metrics = ProxyMetrics()
+    app.state.proxy = ProxyService(
+        app.state.upstream_client,
+        reconnect_attempts=settings.upstream_reconnect_attempts,
+        metrics=app.state.proxy_metrics,
+    )
 
     app.state.token_counters = TokenCounterFactory.from_settings(settings)
 

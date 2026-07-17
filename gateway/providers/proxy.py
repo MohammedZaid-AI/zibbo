@@ -22,7 +22,9 @@ still parse them.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
@@ -46,12 +48,87 @@ logger = get_logger(__name__)
 # Tells nginx and friends not to buffer an SSE body, which would defeat streaming.
 _ACCEL_BUFFERING_HEADER = "x-accel-buffering"
 
+# Connection-level failures where the request provably never reached the provider:
+# the pool handed back a keepalive connection the server had already closed (its FIN
+# was in flight when the pool last checked the socket), or the connect itself failed.
+# Anthropic sits behind Cloudflare, which drops idle connections aggressively, so
+# under Claude Code's bursty traffic a fraction of sends land on a dead socket and
+# httpx raises *before a single request byte is written*. Retrying is safe precisely
+# because nothing was sent — "server disconnected without sending a response" means
+# the request was never processed. This is the difference between an intermittent 502
+# and a clean 200. TimeoutException is deliberately excluded: a slow server may still
+# be processing the request, so a retry there could double-submit.
+_RETRIABLE_CONNECT_ERRORS = (httpx.ConnectError, httpx.RemoteProtocolError)
+
+
+@dataclass(frozen=True, slots=True)
+class ProxyMetricsSnapshot:
+    """A point-in-time read of the transport counters. Counts only, never content."""
+
+    successful_retries: int
+    failed_retries: int
+    transport_failures: int
+
+
+class ProxyMetrics:
+    """Process-lifetime transport counters, separate from optimization analytics.
+
+    A retry or a transport failure is a property of the *connection*, not of any
+    request's optimization outcome, so it lives here rather than in the analytics
+    engine. Thread-safe: incremented from the request path (sometimes a worker
+    thread), read from ``/internal/stats`` on the event loop.
+    """
+
+    __slots__ = ("_lock", "_successful_retries", "_failed_retries", "_transport_failures")
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._successful_retries = 0
+        self._failed_retries = 0
+        self._transport_failures = 0
+
+    def record_retry_success(self) -> None:
+        """A stale connection was recovered: a retry send opened the response."""
+        with self._lock:
+            self._successful_retries += 1
+
+    def record_retry_exhausted(self) -> None:
+        """Every allowed retry was spent and the connection still would not open."""
+        with self._lock:
+            self._failed_retries += 1
+
+    def record_transport_failure(self) -> None:
+        """A transport error was surfaced to the caller (timeout, or a spent retry)."""
+        with self._lock:
+            self._transport_failures += 1
+
+    def snapshot(self) -> ProxyMetricsSnapshot:
+        with self._lock:
+            return ProxyMetricsSnapshot(
+                successful_retries=self._successful_retries,
+                failed_retries=self._failed_retries,
+                transport_failures=self._transport_failures,
+            )
+
 
 class ProxyService:
     """Relays requests to a provider and responses back to the caller."""
 
-    def __init__(self, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        reconnect_attempts: int = 1,
+        metrics: ProxyMetrics | None = None,
+    ) -> None:
         self._client = client
+        # Extra attempts after the first, only for provably-unsent connection drops.
+        self._reconnect_attempts = max(0, reconnect_attempts)
+        self._metrics = metrics or ProxyMetrics()
+
+    @property
+    def metrics(self) -> ProxyMetrics:
+        return self._metrics
 
     async def forward(
         self,
@@ -79,47 +156,101 @@ class ProxyService:
 
     # -- Response paths ----------------------------------------------------
 
-    async def _forward_buffered(
+    async def _open_upstream(
         self, provider: Provider, upstream: UpstreamRequest, log: BoundLogger
-    ) -> Response:
-        started = time.perf_counter()
-        try:
-            response = await self._client.request(
+    ) -> httpx.Response:
+        """Establish the upstream response, retrying a dropped connection.
+
+        The response is returned with its body **unread**. Every failure raised here
+        is therefore pre-response — no chunk has been consumed — which is what makes
+        the retry safe: a request that never got a byte back was never processed, so
+        re-sending it cannot double-submit. Both the buffered and streaming paths go
+        through this one boundary so the safety argument holds for both.
+        """
+        attempts = self._reconnect_attempts + 1
+        retried = False
+        for attempt in range(1, attempts + 1):
+            # Rebuilt each attempt: a request whose content stream was consumed by a
+            # failed send cannot be replayed as-is.
+            request = self._client.build_request(
                 upstream.method,
                 upstream.url,
                 headers=upstream.headers,
                 # A bare `b""` would make httpx send `content-length: 0` on a GET.
                 content=upstream.content or None,
             )
+            attempt_started = time.perf_counter()
+            try:
+                response = await self._client.send(request, stream=True)
+            except _RETRIABLE_CONNECT_ERRORS as exc:
+                if attempt >= attempts:
+                    self._metrics.record_retry_exhausted()
+                    self._metrics.record_transport_failure()
+                    log.warning(
+                        "upstream_connection_exhausted",
+                        attempts=attempt,
+                        reason=type(exc).__name__,
+                        request_id=get_request_id(),
+                        elapsed_ms=_elapsed_ms(attempt_started),
+                    )
+                    raise _transport_error(provider, exc) from exc
+                retried = True
+                # No secret is logged: reason is the exception class name, request_id is
+                # a generated UUID. Never a header value, never a byte of the body.
+                log.warning(
+                    "upstream_connection_retry",
+                    attempt=attempt,
+                    reason=type(exc).__name__,
+                    request_id=get_request_id(),
+                    elapsed_ms=_elapsed_ms(attempt_started),
+                )
+                continue
+            except httpx.TimeoutException as exc:
+                self._metrics.record_transport_failure()
+                raise _timeout_error(provider, exc) from exc
+            except httpx.TransportError as exc:
+                self._metrics.record_transport_failure()
+                raise _transport_error(provider, exc) from exc
+
+            if retried:
+                self._metrics.record_retry_success()
+                log.info(
+                    "upstream_connection_recovered",
+                    attempt=attempt,
+                    retry_success=True,
+                    request_id=get_request_id(),
+                    elapsed_ms=_elapsed_ms(attempt_started),
+                )
+            return response
+        raise AssertionError("unreachable: loop returns or raises on the final attempt")
+
+    async def _forward_buffered(
+        self, provider: Provider, upstream: UpstreamRequest, log: BoundLogger
+    ) -> Response:
+        started = time.perf_counter()
+        response = await self._open_upstream(provider, upstream, log)
+        try:
+            body = await response.aread()
         except httpx.TimeoutException as exc:
             raise _timeout_error(provider, exc) from exc
         except httpx.TransportError as exc:
             raise _transport_error(provider, exc) from exc
+        finally:
+            await response.aclose()
 
         log.info(
             "upstream_completed",
             upstream_status=response.status_code,
             upstream_duration_ms=_elapsed_ms(started),
-            response_bytes=len(response.content),
+            response_bytes=len(body),
         )
-        return _relay(response.status_code, response.headers, content=response.content)
+        return _relay(response.status_code, response.headers, content=body)
 
     async def _forward_streaming(
         self, provider: Provider, upstream: UpstreamRequest, log: BoundLogger
     ) -> Response:
         started = time.perf_counter()
-        request = self._client.build_request(
-            upstream.method,
-            upstream.url,
-            headers=upstream.headers,
-            content=upstream.content or None,
-        )
-        try:
-            response = await self._client.send(request, stream=True)
-        except httpx.TimeoutException as exc:
-            raise _timeout_error(provider, exc) from exc
-        except httpx.TransportError as exc:
-            raise _transport_error(provider, exc) from exc
+        response = await self._open_upstream(provider, upstream, log)
 
         # A stream that fails before it starts is a plain JSON error, not an SSE
         # frame. The SDK is still waiting on `Content-Type: application/json`, so

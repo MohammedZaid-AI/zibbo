@@ -117,6 +117,14 @@ class Settings(BaseSettings):
     upstream_pool_timeout_seconds: Annotated[float, Field(gt=0)] = 10.0
     upstream_max_connections: Annotated[int, Field(gt=0)] = 200
     upstream_max_keepalive_connections: Annotated[int, Field(gt=0)] = 50
+    # Drop idle keepalive sockets on our clock, below the provider's idle timeout, so
+    # fewer stale-socket races reach the retry path (Cloudflare fronts Anthropic and
+    # closes idle connections aggressively).
+    upstream_keepalive_expiry_seconds: Annotated[float, Field(gt=0)] = 5.0
+    # Retries after a *pre-response* connection drop — a keepalive socket the provider
+    # closed while it sat idle in the pool. Only failures that provably never reached
+    # the provider are retried, so this cannot double-submit a request. 0 disables it.
+    upstream_reconnect_attempts: Annotated[int, Field(ge=0)] = 1
 
     # -- Providers ---------------------------------------------------------
     # Each provider mounts at its own route prefix. A caller selects a provider by
