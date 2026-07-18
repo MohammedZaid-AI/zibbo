@@ -115,9 +115,7 @@ def test_5_uses_repo_checkout_when_python_lacks_gateway(tmp_path: Path, sys_path
     assert REPO_ROOT.name in result.stdout
 
 
-def test_6_prints_install_instructions_when_nothing_resolves(
-    tmp_path: Path, sys_path: str
-) -> None:
+def test_6_prints_install_instructions_when_nothing_resolves(tmp_path: Path, sys_path: str) -> None:
     # Copy the shim somewhere with no repo above it. The hermetic PATH carries grep/dirname/sh
     # but no interpreter, so nothing resolves and the shim reaches its install-hint branch.
     lone = tmp_path / "isolated" / "zibbo"
