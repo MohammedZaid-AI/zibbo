@@ -8,6 +8,7 @@ asserting which one the shim ultimately runs. The shim is POSIX ``sh``; these te
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -42,66 +43,87 @@ def _run(shim: Path, path: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.fixture
+def sys_path(tmp_path: Path) -> str:
+    """The 'system tools' segment of PATH the shim needs — ``sh``, ``grep``, ``dirname`` —
+    and deliberately no Python.
+
+    A real CI runner's ``/usr/bin`` contains a ``python3`` that can ``import gateway``; if it
+    were on PATH the shim would resolve to it and defeat the controlled fakes each test
+    installs. A hermetic directory keeps interpreter resolution limited to those fakes.
+    Git Bash's ``/usr/bin`` carries no such Python, so it is already hermetic on Windows.
+    """
+    if os.name == "nt":
+        return _SYSTEM_PATH
+    toolbox = tmp_path / "sysbin"
+    toolbox.mkdir()
+    for tool in ("sh", "grep", "dirname"):
+        real = shutil.which(tool)
+        if real is not None:
+            os.symlink(real, toolbox / tool)  # a symlink, so no shebang-needs-sh recursion
+    return str(toolbox)
+
+
 # -- Resolution order --------------------------------------------------------
 
 
-def test_1_prefers_a_real_zibbo_on_path(tmp_path: Path) -> None:
+def test_1_prefers_a_real_zibbo_on_path(tmp_path: Path, sys_path: str) -> None:
     real = tmp_path / "bin"
     _fake(real, "zibbo", 'echo "USED:real $*"\n')  # no shim marker -> a "real" zibbo
-    result = _run(SHIM, f"{real}:{_SYSTEM_PATH}", "status", "x")
+    result = _run(SHIM, f"{real}:{sys_path}", "status", "x")
     assert result.stdout.strip() == "USED:real status x"
 
 
-def test_2_falls_back_to_py_module(tmp_path: Path) -> None:
+def test_2_falls_back_to_py_module(tmp_path: Path, sys_path: str) -> None:
     binn = tmp_path / "bin"
     # `py -c "import gateway"` succeeds; `py -m gateway.cli ...` echoes a marker.
     _fake(binn, "py", 'if [ "$1" = "-c" ]; then exit 0; fi\necho "USED:py $*"\n')
-    result = _run(SHIM, f"{binn}:{_SYSTEM_PATH}", "stats")
+    result = _run(SHIM, f"{binn}:{sys_path}", "stats")
     assert result.stdout.strip() == "USED:py -m gateway.cli stats"
 
 
-def test_3_falls_back_to_python_module(tmp_path: Path) -> None:
+def test_3_falls_back_to_python_module(tmp_path: Path, sys_path: str) -> None:
     binn = tmp_path / "bin"
     _fake(binn, "python", 'if [ "$1" = "-c" ]; then exit 0; fi\necho "USED:python $*"\n')
-    result = _run(SHIM, f"{binn}:{_SYSTEM_PATH}", "doctor")
+    result = _run(SHIM, f"{binn}:{sys_path}", "doctor")
     assert result.stdout.strip() == "USED:python -m gateway.cli doctor"
 
 
-def test_4_falls_back_to_python3_module(tmp_path: Path) -> None:
+def test_4_falls_back_to_python3_module(tmp_path: Path, sys_path: str) -> None:
     binn = tmp_path / "bin"
     _fake(binn, "python3", 'if [ "$1" = "-c" ]; then exit 0; fi\necho "USED:python3 $*"\n')
-    result = _run(SHIM, f"{binn}:{_SYSTEM_PATH}", "logs")
+    result = _run(SHIM, f"{binn}:{sys_path}", "logs")
     assert result.stdout.strip() == "USED:python3 -m gateway.cli logs"
 
 
-def test_5_uses_repo_checkout_when_python_lacks_gateway(tmp_path: Path) -> None:
+def test_5_uses_repo_checkout_when_python_lacks_gateway(tmp_path: Path, sys_path: str) -> None:
     # The real repo shim: <repo>/plugins/claude-code/bin/zibbo, with <repo>/gateway present.
     # A python that CANNOT import gateway is skipped by steps 2-4, then run under step 5 with
-    # PYTHONPATH pointed at the repo.
+    # PYTHONPATH pointed at the repo. Every interpreter name is shadowed so no real
+    # gateway-capable python on PATH can satisfy steps 2-4 ahead of the fake.
     binn = tmp_path / "bin"
-    _fake(
-        binn,
-        "python",
-        'if [ "$1" = "-c" ]; then exit 1; fi\necho "USED:repo PYTHONPATH=$PYTHONPATH"\n',
-    )
-    result = _run(SHIM, f"{binn}:{_SYSTEM_PATH}", "status")
+    for name in ("py", "python", "python3"):
+        _fake(
+            binn,
+            name,
+            'if [ "$1" = "-c" ]; then exit 1; fi\necho "USED:repo PYTHONPATH=$PYTHONPATH"\n',
+        )
+    result = _run(SHIM, f"{binn}:{sys_path}", "status")
     assert result.stdout.startswith("USED:repo PYTHONPATH=")
     # PYTHONPATH points at the repo (path is POSIX-formatted under Git Bash, so match the
     # distinctive trailing directory rather than the native Windows spelling).
     assert REPO_ROOT.name in result.stdout
 
 
-def test_6_prints_install_instructions_when_nothing_resolves(tmp_path: Path) -> None:
-    # Copy the shim somewhere with no repo above it and no interpreter on PATH.
+def test_6_prints_install_instructions_when_nothing_resolves(
+    tmp_path: Path, sys_path: str
+) -> None:
+    # Copy the shim somewhere with no repo above it. The hermetic PATH carries grep/dirname/sh
+    # but no interpreter, so nothing resolves and the shim reaches its install-hint branch.
     lone = tmp_path / "isolated" / "zibbo"
     lone.parent.mkdir(parents=True)
     shutil.copy2(SHIM, lone)
-    tools = tmp_path / "tools"  # only grep/dirname, no zibbo/py/python
-    for real_tool in ("grep", "dirname", "cd"):
-        found = shutil.which(real_tool)
-        if found:
-            _fake(tools, real_tool, f'exec "{found}" "$@"\n')
-    result = _run(lone, f"{tools}:{_SYSTEM_PATH}", "status")
+    result = _run(lone, sys_path, "status")
     assert result.returncode == 127
     assert "Zibbo CLI not found" in result.stderr
 

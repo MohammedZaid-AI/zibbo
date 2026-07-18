@@ -102,6 +102,12 @@ def _load(path: Path) -> tuple[dict[str, object], bool]:
 def _atomic_write(path: Path, data: dict[str, object]) -> None:
     """Write ``data`` as pretty JSON via a temp file + rename, so a failed write never
     leaves a half-written settings file. Raises ``OSError`` on a read-only target."""
+    # A read-only target is refused on every platform. POSIX ``rename`` would replace a
+    # read-only *file* regardless (only the directory's write bit matters), so this explicit
+    # check is what makes "don't modify a read-only settings file" hold on Linux/macOS too,
+    # not just Windows (where ``os.replace`` already fails on a read-only destination).
+    if path.exists() and not os.access(path, os.W_OK):
+        raise PermissionError(f"{path} is read-only")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + _TMP_SUFFIX)
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
