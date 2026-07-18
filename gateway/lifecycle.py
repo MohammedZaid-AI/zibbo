@@ -170,8 +170,9 @@ def configure_routing(base_url: str, *, target: Path | None = None) -> Configure
 
     if previous_str == base_url:
         # Already routed here. Leave the file (and any existing state) exactly as-is.
-        return ConfigureResult(target, previous_str, created_file=False, backed_up=False,
-                               already_routed=True)
+        return ConfigureResult(
+            target, previous_str, created_file=False, backed_up=False, already_routed=True
+        )
 
     # Record the pre-Zibbo state once. If it already exists (a prior start), keep it: it
     # holds the true original, which re-recording the now-modified file would lose.
@@ -198,8 +199,9 @@ def configure_routing(base_url: str, *, target: Path | None = None) -> Configure
             backup.unlink(missing_ok=True)
         raise SettingsError(f"cannot write {target}: {exc}") from exc
 
-    return ConfigureResult(target, previous_str, created_file=not existed, backed_up=made_backup,
-                           already_routed=False)
+    return ConfigureResult(
+        target, previous_str, created_file=not existed, backed_up=made_backup, already_routed=False
+    )
 
 
 # -- Restore (stop) ----------------------------------------------------------
@@ -254,8 +256,9 @@ def restore_routing(*, target: Path | None = None) -> RestoreResult:
 
     # State consumed; removing it keeps the invariant "state exists ⇔ routed by Zibbo".
     backup.unlink(missing_ok=True)
-    return RestoreResult(target, restored_to=previous, removed=(previous is None and changed),
-                         changed=changed)
+    return RestoreResult(
+        target, restored_to=previous, removed=(previous is None and changed), changed=changed
+    )
 
 
 def persisted_base_url(*, target: Path | None = None) -> str | None:
@@ -342,6 +345,13 @@ def stop_gateway(is_reachable: Callable[[], bool], *, path: Path | None = None) 
 
     pid = info["pid"]
     assert isinstance(pid, int)  # noqa: S101 — read_pidfile only returns an int pid
+
+    # If nothing is answering, the gateway already stopped. Do NOT signal the recorded PID:
+    # the OS may have recycled it for an unrelated process. Drop the stale PID file instead.
+    if not is_reachable():
+        clear_pidfile(path=path)
+        return StopResult("not_running", pid=pid)
+
     _terminate(pid)
     for _ in range(30):  # up to ~6s for the port to close
         if not is_reachable():

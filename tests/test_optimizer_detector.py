@@ -15,6 +15,7 @@ from gateway.optimizers.detector import (
     JsonSniffer,
     MagicBytesSniffer,
     PlainTextSniffer,
+    PromptSniffer,
     XmlSniffer,
     content_type_from_mime,
 )
@@ -240,3 +241,19 @@ def test_detector_is_extensible_via_sniffers() -> None:
 
     detector = ContentDetector([AlwaysCsv(), PlainTextSniffer()])
     assert detector.detect("<html><body><p>x</p></body></html>").content_type is ContentType.CSV
+
+
+def test_prompt_sniffer_refuses_a_stack_trace_with_repeated_frames() -> None:
+    """Regression: a recursion traceback (identical frames) must never be classified PROMPT.
+
+    The prompt optimizer collapses byte-identical blocks; misclassifying a trace let it
+    remove stack frames, corrupting the trace and breaking the documented guarantee that
+    stack traces are forwarded verbatim. A traceback header is now refused outright.
+    """
+    sniffer = PromptSniffer(min_chars=1, min_duplicate_ratio=0.15)
+    recursion = (
+        "Traceback (most recent call last):\n\n"
+        + "\n\n".join('  File "app.py", line 5, in recurse\n    recurse()' for _ in range(6))
+        + "\n\nRecursionError: maximum recursion depth exceeded"
+    )
+    assert sniffer.sniff(recursion) is None

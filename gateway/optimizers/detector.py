@@ -276,6 +276,11 @@ _CODE_OR_LOG_RE: Final = re.compile(
 )
 
 
+# A stack-trace header. Its presence means the content is a trace to preserve verbatim,
+# never a prompt to de-duplicate — collapsing repeated frames would destroy it.
+_TRACEBACK_RE: Final = re.compile(r"^[ \t]*Traceback \(most recent call last\):", re.MULTILINE)
+
+
 class PromptSniffer:
     """Classify long, duplicate-heavy prose/Markdown as an optimizable PROMPT.
 
@@ -302,6 +307,13 @@ class PromptSniffer:
 
         non_blank = [line for line in content.splitlines() if line.strip()]
         if len(non_blank) < 2:
+            return None
+
+        # A stack trace is forwarded verbatim — de-duplicating repeated frames (recursion)
+        # would corrupt it. The code/log ratio below can be diluted below its threshold by a
+        # trace's indented frame bodies and its exception summary line, so a traceback header
+        # is refused outright.
+        if _TRACEBACK_RE.search(content):
             return None
 
         code_or_log = sum(1 for line in non_blank if _CODE_OR_LOG_RE.match(line))

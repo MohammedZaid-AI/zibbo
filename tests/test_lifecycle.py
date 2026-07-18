@@ -245,3 +245,24 @@ def test_stop_gateway_terminates_a_real_child_process(tmp_path: Path) -> None:
     assert result.outcome == "stopped"
     assert proc.wait(timeout=5) is not None  # the child really exited
     assert lifecycle.read_pidfile(path=path) is None  # pid file cleared
+
+
+def test_stop_gateway_does_not_signal_a_stale_or_reused_pid(tmp_path: Path) -> None:
+    """Regression: if the gateway is not answering, its recorded PID may have been recycled
+    by the OS for an unrelated process. stop must not signal it — it drops the stale PID
+    file and reports the gateway already stopped, killing nothing."""
+    import subprocess
+
+    innocent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    path = tmp_path / "gateway.json"
+    lifecycle.write_pidfile(innocent.pid, GATEWAY, path=path)
+    try:
+        # Gateway not reachable (it died), but the PID file still points at innocent.pid.
+        result = lifecycle.stop_gateway(lambda: False, path=path)
+
+        assert result.outcome == "not_running"
+        assert innocent.poll() is None, "stop must not kill an unrelated process"
+        assert lifecycle.read_pidfile(path=path) is None, "the stale PID file is cleared"
+    finally:
+        innocent.terminate()
+        innocent.wait(timeout=5)
