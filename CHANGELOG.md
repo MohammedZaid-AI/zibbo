@@ -4,9 +4,19 @@ All notable changes to Zibbo are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Zibbo adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — Unreleased
+## [0.1.1] — 2026-07-18
 
-First public release. A deterministic context optimization engine for AI coding assistants.
+First published release.
+
+### Fixed
+
+- Declared the `reportlab` test dependency (used only by the PDF-extraction test
+  fixtures) so a clean checkout's test suite and CI run green. No change to
+  optimization behavior or the API.
+
+## [0.1.0] — 2026-07-18
+
+A deterministic context optimization engine for AI coding assistants.
 
 ### Added
 
@@ -34,4 +44,5 @@ First public release. A deterministic context optimization engine for AI coding 
 - No LLM is used to optimize; the same input always produces the same output.
 - Request contents are never stored — logs and statistics are metadata only.
 
+[0.1.1]: https://github.com/MohammedZaid-AI/zibbo/releases/tag/v0.1.1
 [0.1.0]: https://github.com/MohammedZaid-AI/zibbo/releases/tag/v0.1.0

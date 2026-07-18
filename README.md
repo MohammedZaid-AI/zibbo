@@ -6,11 +6,12 @@
 
 **A deterministic context optimization engine for AI coding assistants.**
 
-Zibbo is a local proxy that removes structural noise — HTML chrome, JSON
-whitespace, log boilerplate — from each request before it reaches the model.
-The information is preserved; the token count drops. No second model is
-involved, and the same input always produces the same output.
+Zibbo removes structural noise — HTML chrome, JSON whitespace, log boilerplate —
+from each request before it reaches the model. The information is preserved; the
+token count drops. No second model is involved, and the same input always
+produces the same output. It runs locally, forwarding traffic on your own API key.
 
+[![CI](https://github.com/MohammedZaid-AI/zibbo/actions/workflows/ci.yml/badge.svg)](https://github.com/MohammedZaid-AI/zibbo/actions/workflows/ci.yml)
 [![HTML docs −77% tokens](https://img.shields.io/badge/HTML_docs-%E2%88%9277%25_tokens-brightgreen)](docs/BENCHMARKS.md)
 [![no LLM in the loop](https://img.shields.io/badge/LLM_in_the_loop-none-blue)](#what-zibbo-never-does)
 [![deterministic](https://img.shields.io/badge/transformations-deterministic-black)](#trust)
@@ -89,6 +90,34 @@ touches responses. The provider receives a smaller, equivalent request.
 ```bash
 pipx install git+https://github.com/MohammedZaid-AI/zibbo
 ```
+
+---
+
+## Measure before you route
+
+See what Zibbo would save on a real file **before** it touches your assistant's
+traffic. Benchmarking runs the pipeline locally and forwards nothing to a
+provider — your API key is never used.
+
+```bash
+zibbo start                                          # start the local gateway
+zibbo benchmark --content "$(cat some-page.html)"    # measure — nothing is sent upstream
+zibbo stop                                           # stop, and restore your settings exactly
+```
+
+```text
+Zibbo benchmark  (sample)
+
+  Content type:     html
+  Original tokens:  939
+  Optimized tokens: 230
+  Reduction:        75.5%
+```
+
+The routing config `zibbo start` writes only takes effect after you **restart**
+your assistant — so this loop never routes real traffic, and `zibbo stop` puts
+your settings back exactly. Source code returns ~0%, and it says so. When the
+numbers convince you, route for real (below).
 
 ---
 

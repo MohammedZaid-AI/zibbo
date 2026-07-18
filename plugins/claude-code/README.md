@@ -79,7 +79,7 @@ Every session begins with the activation banner:
 ```
 🟢 Zibbo Active
 
-  ✓ Gateway        Running (0.1.0)
+  ✓ Gateway        Running (0.1.1)
   ✓ Authentication Claude subscription (OAuth login)
   ✓ Routing        Through Zibbo
   ✓ Optimization   Enabled
@@ -94,7 +94,7 @@ never mentions API keys:
 ```
 🟡 Zibbo - one step left
 
-  ✓ Gateway        Running (0.1.0)
+  ✓ Gateway        Running (0.1.1)
   ✓ Authentication Claude subscription (OAuth login)
   ✗ Routing        Not routed
   ...

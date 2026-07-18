@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zibbo"
-version = "0.1.0"
+version = "0.1.1"
 description = "A deterministic context optimization engine for AI coding assistants. Strips structural noise from requests before they reach the model — no LLM in the loop, source code never touched."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -62,6 +62,9 @@ dev = [
     "anthropic>=0.40.0",
     # Property-based tests: determinism and idempotency of every transformer.
     "hypothesis>=6.100.0",
+    # PDF fixtures: the document-extraction tests generate real PDFs to feed the
+    # extractor. Used only by tests/mocks/documents.py.
+    "reportlab>=4.0.0",
 ]
 
 [project.urls]

@@ -34,7 +34,7 @@ body:
     attributes:
       label: Zibbo version
       description: Output of `zibbo version`.
-      placeholder: zibbo 0.1.0 (internal API v1)
+      placeholder: zibbo 0.1.1 (internal API v1)
     validations:
       required: true
   - type: input
