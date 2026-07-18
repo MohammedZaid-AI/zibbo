@@ -34,3 +34,8 @@ package-lock.json
 
 # Benchmark output
 benchmark-results.json
+
+# Claude Code personal settings + Zibbo routing state/backups (never commit)
+.claude/settings.local.json*
+*.zibbo.bak
+*.zibbo.tmp

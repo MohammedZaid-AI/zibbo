@@ -1,250 +1,249 @@
 <div align="center">
 
-<img src="docs/assets/avatar.png" alt="Zibbo" width="160" height="160" />
+<img src="docs/assets/avatar.png" alt="Zibbo" width="140" height="140" />
 
 # Zibbo
-### Your AI coding assistant wastes tokens. Zibbo takes them back.
 
-Claude Code, Codex, and Gemini CLI send raw HTML, logs, JSON, and PDFs straight
-to the model. Zibbo cleans out the noise first — **same answers, up to 75% fewer tokens.**
+**A deterministic context optimization engine for AI coding assistants.**
 
-One command to install. Zero changes to your code.
+Zibbo is a local proxy that removes structural noise — HTML chrome, JSON
+whitespace, log boilerplate — from each request before it reaches the model.
+The information is preserved; the token count drops. No second model is
+involved, and the same input always produces the same output.
 
-<br>
-
-[![GitHub stars](https://img.shields.io/github/stars/MohammedZaid-AI/zibbo?style=social)](https://github.com/MohammedZaid-AI/zibbo)
-[![token reduction](https://img.shields.io/badge/token_reduction-up_to_75%25-brightgreen)](docs/BENCHMARKS.md)
-[![no AI in the loop](https://img.shields.io/badge/AI_in_the_loop-none-blue)](#-what-zibbo-will-never-do)
-[![license](https://img.shields.io/badge/license-MIT-black)](LICENSE)
-
-<br>
-
-```text
-/plugin marketplace add MohammedZaid-AI/zibbo
-```
-
-<br>
-
-![Zibbo demo](docs/assets/demo.gif)
-
-<sub><i>Placeholder — drop a demo GIF at <code>docs/assets/demo.gif</code></i></sub>
+[![HTML docs −77% tokens](https://img.shields.io/badge/HTML_docs-%E2%88%9277%25_tokens-brightgreen)](docs/BENCHMARKS.md)
+[![no LLM in the loop](https://img.shields.io/badge/LLM_in_the_loop-none-blue)](#what-zibbo-never-does)
+[![deterministic](https://img.shields.io/badge/transformations-deterministic-black)](#trust)
+[![license](https://img.shields.io/badge/license-Apache_2.0-black)](LICENSE)
 
 </div>
 
 ---
 
-## The 15-second version
+## What it does
 
-Claude Code often sends HTML pages, stack traces, JSON blobs, docs, and PDFs
-straight to the model.
+AI coding assistants send whole HTML pages, pretty-printed JSON, stack traces,
+and PDFs to the model. Much of that is scripts, nav bars, indentation, and
+base64 — tokens you pay for that carry no information.
 
-Most of that is scripts, nav bars, whitespace, and base64 — **and you pay for
-every token of it.**
+Zibbo removes that structural noise on your machine, then forwards the request
+to the real provider on your own API key. It converts HTML to Markdown,
+minifies JSON, and normalizes whitespace. It does not summarize, paraphrase, or
+reorder anything, and it calls no model to do the work.
 
-Zibbo strips the noise before the request reaches the model.
-
-Your source code is never touched.
+If a request wouldn't get smaller, Zibbo forwards the original bytes unchanged.
 
 ---
 
-## Is Zibbo for me?
+## Before / after
 
-**You'll love it if you regularly send:**
+A documentation page pasted into an assistant (`nextjs-docs-explain` in the
+benchmark suite):
 
-| ✅ | |
-|---|---|
-| ✅ | Documentation & web pages |
-| ✅ | HTML |
-| ✅ | Swagger / OpenAPI specs |
-| ✅ | Stack traces & logs |
-| ✅ | API responses |
-| ✅ | Large JSON |
-| ✅ | PDFs |
+```
+   You send                          Zibbo forwards
+   ┌──────────────────────┐          ┌──────────────────────┐
+   │ <!DOCTYPE html>…      │          │ # Installing Next.js  │
+   │ <script>…analytics…   │  ──────► │                       │
+   │ <nav>…</nav>          │          │ Run `npx create-next… │
+   │ 939 tokens            │          │ 230 tokens            │
+   └──────────────────────┘          └──────────────────────┘
+                                         75% fewer tokens
+```
 
-**You probably don't need it if you mostly send:**
+Source files are a different story — and Zibbo says so:
 
-| ❌ | |
-|---|---|
-| ❌ | Pure source code |
-| ❌ | Tiny prompts |
-| ❌ | Already-clean Markdown |
+```
+   main.py (247 tokens)  ──────►  main.py (247 tokens)     0% change
+```
 
-We'd rather tell you the truth than oversell it. Zibbo shines on messy context
-and honestly says `~0%` when there's nothing to clean.
+---
+
+## How it works
+
+```
+   ┌────────────┐      ┌─────────────────────────────┐      ┌───────────┐
+   │ Claude Code│      │            Zibbo             │      │  Provider │
+   │  / Codex   │ ───► │  detect → transform → verify │ ───► │ Anthropic │
+   │  / any SDK │      │  (HTML, JSON, logs, PDFs)    │      │  / OpenAI │
+   └────────────┘      └─────────────────────────────┘      └───────────┘
+```
+
+A transparent proxy: it optimizes the request body, forwards it on your own
+credentials, and streams the provider's response straight back — Zibbo never
+touches responses. The provider receives a smaller, equivalent request.
 
 ---
 
 ## Install
 
-Pick your tool. That's the whole setup.
-
-### Claude Code
+**Claude Code**
 
 ```text
 /plugin marketplace add MohammedZaid-AI/zibbo
 /plugin install zibbo@zibbo
 ```
 
-Then point Claude Code at the gateway:
+**Standalone CLI (any assistant)**
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:8000/anthropic
+pipx install git+https://github.com/MohammedZaid-AI/zibbo
 ```
-
-A hook launches the gateway for you. Type `/zibbo:zibbo` to watch the savings roll in.
-
-### Codex
-
-```text
-codex plugin marketplace add MohammedZaid-AI/zibbo
-codex plugin install zibbo
-```
-
-### Any other assistant (CLI)
-
-```bash
-pip install -e ".[dev]"
-python -m gateway            # http://localhost:8000
-```
-
-Point your tool's base URL at Zibbo — `…/v1` for OpenAI-style, `…/anthropic`
-for Anthropic-style. Your API key is forwarded untouched; requests still bill
-your own account.
 
 ---
 
-## See it working
+## Start
 
-One real documentation request through Claude Code:
+`zibbo start` runs the gateway and points Claude Code at it. You do not edit a
+settings file by hand.
 
-```text
-   Without Zibbo              With Zibbo
-   ┌────────────┐            ┌────────────┐
-   │  120,000   │            │   74,000   │   ← same answer
-   │   tokens   │   ────►    │   tokens   │
-   └────────────┘            └────────────┘
-                                  ▼
-                          ~38% cheaper request
+```bash
+zibbo start
 ```
 
-![zibbo explain](docs/assets/explain.png)
+```text
+✓ Gateway started (http://127.0.0.1:8000)
+✓ Claude Code configured  (.claude/settings.local.json)
 
-<sub><i>Placeholder — <code>zibbo explain</code> shows exactly what was removed and how many tokens it saved.</i></sub>
+  Restart Claude Code for routing to take effect.
+```
+
+For any other assistant, set its base URL to Zibbo — `…/v1` for OpenAI-style
+clients, `…/anthropic` for Anthropic-style. Your API key is forwarded untouched;
+requests bill your own account.
 
 ---
 
-## The receipts
+## Verify what it changed
 
-Real files, the real pipeline, honest numbers.
+Every response states what Zibbo did, in headers:
 
-| What you're sending | Token reduction |
-|---|:---:|
-| 📄 HTML documentation | **~75%** |
-| 🔩 Verbose JSON APIs | **~49%** |
-| 💻 Source code | **~0%** |
+```text
+x-zibbo-optimization: applied
+x-zibbo-tokens-saved: 709
+```
 
-That last row is the honest one. Source code goes through **untouched** — so if
-your day is mostly code, Zibbo won't change your bill, and it says so. If your
-day is docs, API payloads, and logs, it pays for itself immediately.
+Inspect the last request, or run any file through the pipeline yourself:
 
-<div align="center">
+```text
+$ zibbo explain
 
-**29.9% average token reduction · 41.2% average cost reduction** across a 10-case suite.
+Last request
 
-</div>
+  Content type:      HTML
+  Original tokens:   939
+  Optimized tokens:  230
+  Saved:             709 (75.5%)
 
-Reproduce every number yourself: `zibbo benchmark --suite` · full method in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+  Transformations applied:
+    ✓ Removed scripts
+    ✓ Removed navigation
+    ✓ Converted HTML to Markdown
+```
+
+```bash
+zibbo benchmark --content "$(cat some-page.html)"
+```
+
+---
+
+## What is optimized
+
+| Input | What Zibbo removes | Reduction |
+|---|---|:---:|
+| **HTML** pages & docs | scripts, styles, nav, ads → Markdown | **77%** |
+| **JSON** API responses | pretty-print whitespace and escapes → minified | **43%** |
+| **PDF / DOCX** attachments | base64 payload → extracted text | varies |
+| **Logs / prose** | trailing whitespace, redundant blank lines | small |
+| **Source code** | nothing — code is not reformatted | **0%** |
+
+Numbers are averages by content type from a 10-case suite: **28% average
+reduction per request, 40% by token volume**. Reproduce them with `zibbo
+benchmark --suite`; method and per-case results in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+## What Zibbo never does
+
+- It does not call another model. There is no LLM in the optimization path.
+- It does not summarize, paraphrase, or reorder your prompts.
+- It does not reformat or reindent source code; inline whitespace is preserved.
+- It does not make a request larger. If optimizing wouldn't help, it forwards the original bytes.
+- It does not store request contents. Logs and statistics are metadata only.
+
+---
+
+## Stop
+
+```bash
+zibbo stop
+```
+
+```text
+✓ Gateway stopped
+✓ Claude Code restored  (removed Zibbo routing)
+
+  Restart Claude Code to return to the normal endpoint.
+```
+
+`zibbo stop` restores the endpoint from a backup written at `start`, including
+any base URL you had configured before.
 
 ---
 
 ## Optional: prompt de-duplication
 
-Long, hand-written coding prompts repeat themselves — the same instruction pasted twice,
-a `Requirements:` section copied and edited. Zibbo can strip that **exact** redundancy,
-deterministically, with no model in the loop. It removes exact-duplicate instruction
-blocks, repeated sections, and duplicate bullets under the same heading — and never
-paraphrases, reorders, or touches code, examples, or stack traces.
+Long, hand-written prompts often repeat themselves — an instruction pasted
+twice, a `Requirements:` section copied and edited. Zibbo can remove that exact
+redundancy: duplicate instruction blocks, repeated sections, and duplicate
+bullets under the same heading. It does not paraphrase, reorder, or touch code,
+examples, or stack traces.
 
-It's **off by default**. Turn it on when you want it:
+Off by default:
 
 ```bash
 zibbo enable prompt      # live, no restart   (or set ZIBBO_PROMPT_OPTIMIZATION=true)
 zibbo disable prompt
 ```
 
-Measured on realistic assistant prompts: **17–87% fewer tokens** depending on how
-repetitive the prompt is. Full behaviour and guarantees in
-[docs/PROMPT_OPTIMIZATION.md](docs/PROMPT_OPTIMIZATION.md); benchmark it with
-`python -m benchmarks.prompts`.
+Behaviour and guarantees: [docs/PROMPT_OPTIMIZATION.md](docs/PROMPT_OPTIMIZATION.md).
 
 ---
 
 ## Commands
 
 ```bash
-zibbo status      # is it running? what's enabled?
-zibbo stats       # tokens & cost saved, today and all-time
-zibbo explain     # why the last request got smaller
-zibbo benchmark   # try it on any file and see the savings
+zibbo start       # start the gateway and route your assistant through it
+zibbo stop        # stop the gateway and restore your assistant's endpoint
+zibbo status      # what is running, what is routed, current endpoint
+zibbo stats       # tokens saved, today and all-time
+zibbo explain     # what the last request had removed, and why
+zibbo benchmark   # measure the savings on any file, or the built-in suite
+zibbo doctor      # diagnose setup problems; each check names its fix
 ```
 
-![zibbo status](docs/assets/status.png)
-
-<sub><i>Placeholder — <code>zibbo status</code>. Full command list: <code>zibbo --help</code>.</i></sub>
-
-Try it on anything, no assistant required:
-
-```bash
-zibbo benchmark --content "$(cat some-page.html)"
-```
-
-Inside Claude Code, it's all there as `/zibbo:zibbo`, `/zibbo:stats`, `/zibbo:doctor`
-(Claude Code namespaces plugin commands, so they start with `/zibbo:`).
+Inside Claude Code the same views are `/zibbo:zibbo`, `/zibbo:stats`, and
+`/zibbo:doctor`.
 
 ---
 
-## 🔒 What Zibbo will never do
+## Trust
 
-This is the part that lets you install without worrying:
+Four guarantees, each covered by property tests in the suite:
 
-- ✓ **Never** rewrites your source code
-- ✓ **Never** uses another AI model
-- ✓ **Never** summarizes or paraphrases your prompts
-- ✓ **Never** makes a request bigger — if cleaning wouldn't help, it forwards the original
-- ✓ **Never** stores your prompt contents — logs and stats are metadata only
-
-Same input, same output, every time. No model, no guessing, no surprises.
-
-Every response even tells you what happened:
-
-```text
-x-zibbo-optimization: applied
-x-zibbo-tokens-saved: 110
-```
+- **Deterministic** — no model, no randomness. Output is a pure function of input.
+- **Idempotent** — `pipeline(pipeline(x)) == pipeline(x)`. Running it twice changes nothing.
+- **Never-grow** — a transformation that produces more tokens is discarded and the original forwarded.
+- **Content-blind logging** — no request body enters a log line, a statistic, or a benchmark result.
 
 ---
 
 ## Architecture
 
-![How Zibbo works](docs/assets/architecture.svg)
+A request is classified by its content (not its declared type), routed to the
+transformer that handles it, transformed, checked against the never-grow
+guarantee, cached, and forwarded. Providers, transformers, caching, and plugins
+are pluggable. Full internals: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Zibbo sits between your assistant and the model. Messy context goes in, clean
-Markdown comes out, your code passes straight through.
+## License
 
-```text
-  Claude Code  ──►  Zibbo  ──►  Model
-                  (cleans HTML, JSON,
-                   logs, PDFs — never code)
-```
-
-Want the internals — providers, transformers, caching, plugins?
-→ [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-
----
-
-<div align="center">
-
-### Spend your tokens on answers, not noise.
-
-[Install](#install) · [Benchmarks](docs/BENCHMARKS.md) · [Docs](docs/) · [Star on GitHub ⭐](https://github.com/MohammedZaid-AI/zibbo)
-</div>
+[Apache-2.0](LICENSE).

@@ -1369,9 +1369,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plugin.add_argument("--plugin-dir", help="path to plugins/claude-code (default: this checkout)")
 
-    start = sub.add_parser(
-        "start", help="start the gateway and route Claude Code through it"
-    )
+    start = sub.add_parser("start", help="start the gateway and route Claude Code through it")
     start.add_argument("--port", type=int, help="port to start on (sets ZIBBO_PORT)")
 
     sub.add_parser("stop", help="stop the gateway and restore Claude Code's endpoint")

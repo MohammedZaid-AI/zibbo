@@ -345,9 +345,7 @@ def _toggle_response(control: RuntimeControl) -> ToggleResponse:
     )
 
 
-def _set_prompt_optimization(
-    request: Request, control: RuntimeControl, *, enabled: bool
-) -> None:
+def _set_prompt_optimization(request: Request, control: RuntimeControl, *, enabled: bool) -> None:
     """Flip the prompt flag and bring the shared registry and detector into line.
 
     The registry and detector live on ``app.state`` and are read from worker threads;

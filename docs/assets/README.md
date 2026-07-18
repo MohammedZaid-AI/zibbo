@@ -1,14 +1,14 @@
 # README assets
 
-Drop the images the main [README](../../README.md) references here. Until they
-exist, the README shows labelled placeholders.
+The main [README](../../README.md) shows real terminal output as text, so the
+only image it needs is the avatar. The rest is optional polish for a richer
+GitHub landing page — the README reads correctly without any of it.
 
-| File | Shows | Suggested capture |
-|---|---|---|
-| `avatar.png` | The project avatar shown at the top of the README | 160×160 (or square) brand image |
-| `demo.gif` | The hero loop | Paste a big HTML page into Claude Code, then run `/zibbo explain` |
-| `explain.png` | Per-request savings | `zibbo explain` after a real optimized request |
-| `status.png` | Gateway health | `zibbo status` with the gateway running |
-| `architecture.svg` | The one-glance flow | assistant → Zibbo → model (code passes through) |
+| File | Used | Shows | Suggested capture |
+|---|---|---|---|
+| `avatar.png` | **yes** | The project avatar at the top of the README | Square brand image, ~140×140 |
+| `demo.gif` | optional | A short hero loop | Paste a big HTML page into Claude Code, then run `/zibbo:explain` |
 
-Keep them lightweight (GIFs under ~5 MB) so the README loads fast on GitHub.
+Keep any image lightweight (GIFs under ~5 MB) so the README loads fast on GitHub.
+Prefer text output over screenshots where possible — it stays accurate as the CLI
+evolves, and it is searchable and copy-pasteable.

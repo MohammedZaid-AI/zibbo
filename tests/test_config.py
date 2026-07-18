@@ -14,7 +14,6 @@ def test_defaults_are_development_safe() -> None:
     assert settings.environment is Environment.DEVELOPMENT
     assert settings.port == 8000
     assert settings.docs_enabled is True
-    assert settings.database_url is None
 
 
 def test_docs_are_disabled_in_production() -> None:

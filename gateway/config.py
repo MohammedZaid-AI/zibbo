@@ -161,9 +161,9 @@ class Settings(BaseSettings):
     ollama_base_url: str | None = None
     ollama_api_key: SecretStr | None = None
 
-    # -- Backing services (wired up in later phases) -----------------------
-    database_url: str | None = None
+    # -- Backing services --------------------------------------------------
     redis_url: str | None = None
+    """Connection URL for the Redis cache backend; used when ``cache_backend`` is ``redis``."""
 
     # -- Optimization ------------------------------------------------------
     optimization_enabled: bool = True

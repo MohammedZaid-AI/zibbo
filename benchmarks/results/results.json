@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "tokenizer_exact": false,
+  "tokenizer_exact": true,
   "measured_with": {
     "provider": "openai",
     "model": "gpt-4o"
   },
   "totals": {
     "cases": 10,
-    "cases_helped": 10,
-    "original_tokens": 4419,
-    "optimized_tokens": 2600,
-    "tokens_saved": 1819,
+    "cases_helped": 6,
+    "original_tokens": 3857,
+    "optimized_tokens": 2292,
+    "tokens_saved": 1565,
     "original_bytes": 15898,
     "optimized_bytes": 8859,
-    "overall_token_reduction_pct": 41.16,
-    "avg_token_reduction_pct": 29.91,
+    "overall_token_reduction_pct": 40.58,
+    "avg_token_reduction_pct": 28.41,
     "cache_hit_rate": 1.0
   },
   "cost_by_provider": [
@@ -23,44 +23,44 @@
       "label": "OpenAI GPT-4o",
       "model": "gpt-4o",
       "usd_per_million_input_tokens": 2.5,
-      "cost_before_usd": 0.011048,
-      "cost_after_usd": 0.0065,
-      "cost_saved_usd": 0.004548
+      "cost_before_usd": 0.009643,
+      "cost_after_usd": 0.00573,
+      "cost_saved_usd": 0.003913
     },
     {
       "key": "anthropic",
       "label": "Claude Sonnet",
       "model": "claude-sonnet-4",
       "usd_per_million_input_tokens": 3.0,
-      "cost_before_usd": 0.013257,
-      "cost_after_usd": 0.0078,
-      "cost_saved_usd": 0.005457
+      "cost_before_usd": 0.011571,
+      "cost_after_usd": 0.006876,
+      "cost_saved_usd": 0.004695
     },
     {
       "key": "openai-mini",
       "label": "OpenAI GPT-4o mini",
       "model": "gpt-4o-mini",
       "usd_per_million_input_tokens": 0.15,
-      "cost_before_usd": 0.000663,
-      "cost_after_usd": 0.00039,
-      "cost_saved_usd": 0.000273
+      "cost_before_usd": 0.000579,
+      "cost_after_usd": 0.000344,
+      "cost_saved_usd": 0.000235
     }
   ],
   "file_types": [
     {
       "content_type": "html",
       "cases": 2,
-      "avg_token_reduction_pct": 75.19
+      "avg_token_reduction_pct": 77.33
     },
     {
       "content_type": "json",
       "cases": 3,
-      "avg_token_reduction_pct": 49.0
+      "avg_token_reduction_pct": 43.02
     },
     {
       "content_type": "text",
       "cases": 5,
-      "avg_token_reduction_pct": 0.34
+      "avg_token_reduction_pct": 0.08
     }
   ],
   "top_transformers": [
@@ -106,10 +106,10 @@
       "original_bytes": 1775,
       "optimized_bytes": 1772,
       "bytes_removed": 3,
-      "original_tokens": 572,
-      "optimized_tokens": 571,
-      "tokens_saved": 1,
-      "token_reduction_pct": 0.17,
+      "original_tokens": 480,
+      "optimized_tokens": 478,
+      "tokens_saved": 2,
+      "token_reduction_pct": 0.42,
       "cache_hit": true,
       "transformers": [
         "collapsed_blank_lines"
@@ -123,10 +123,10 @@
       "original_bytes": 4335,
       "optimized_bytes": 1470,
       "bytes_removed": 2865,
-      "original_tokens": 833,
-      "optimized_tokens": 372,
-      "tokens_saved": 461,
-      "token_reduction_pct": 55.34,
+      "original_tokens": 668,
+      "optimized_tokens": 354,
+      "tokens_saved": 314,
+      "token_reduction_pct": 47.01,
       "cache_hit": true,
       "transformers": [
         "minified_json"
@@ -140,10 +140,10 @@
       "original_bytes": 649,
       "optimized_bytes": 648,
       "bytes_removed": 1,
-      "original_tokens": 200,
-      "optimized_tokens": 199,
-      "tokens_saved": 1,
-      "token_reduction_pct": 0.5,
+      "original_tokens": 178,
+      "optimized_tokens": 178,
+      "tokens_saved": 0,
+      "token_reduction_pct": 0.0,
       "cache_hit": true,
       "transformers": [
         "stripped_trailing_whitespace"
@@ -157,10 +157,10 @@
       "original_bytes": 1086,
       "optimized_bytes": 1085,
       "bytes_removed": 1,
-      "original_tokens": 343,
-      "optimized_tokens": 342,
-      "tokens_saved": 1,
-      "token_reduction_pct": 0.29,
+      "original_tokens": 272,
+      "optimized_tokens": 272,
+      "tokens_saved": 0,
+      "token_reduction_pct": 0.0,
       "cache_hit": true,
       "transformers": [
         "stripped_trailing_whitespace"
@@ -174,10 +174,10 @@
       "original_bytes": 3223,
       "optimized_bytes": 998,
       "bytes_removed": 2225,
-      "original_tokens": 1030,
-      "optimized_tokens": 267,
-      "tokens_saved": 763,
-      "token_reduction_pct": 74.08,
+      "original_tokens": 939,
+      "optimized_tokens": 230,
+      "tokens_saved": 709,
+      "token_reduction_pct": 75.51,
       "cache_hit": true,
       "transformers": [
         "removed_ads_and_banners",
@@ -196,10 +196,10 @@
       "original_bytes": 1548,
       "optimized_bytes": 449,
       "bytes_removed": 1099,
-      "original_tokens": 536,
-      "optimized_tokens": 127,
-      "tokens_saved": 409,
-      "token_reduction_pct": 76.31,
+      "original_tokens": 494,
+      "optimized_tokens": 103,
+      "tokens_saved": 391,
+      "token_reduction_pct": 79.15,
       "cache_hit": true,
       "transformers": [
         "removed_ads_and_banners",
@@ -218,10 +218,10 @@
       "original_bytes": 1138,
       "optimized_bytes": 447,
       "bytes_removed": 691,
-      "original_tokens": 262,
+      "original_tokens": 235,
       "optimized_tokens": 128,
-      "tokens_saved": 134,
-      "token_reduction_pct": 51.15,
+      "tokens_saved": 107,
+      "token_reduction_pct": 45.53,
       "cache_hit": true,
       "transformers": [
         "minified_json"
@@ -235,10 +235,10 @@
       "original_bytes": 888,
       "optimized_bytes": 887,
       "bytes_removed": 1,
-      "original_tokens": 270,
-      "optimized_tokens": 269,
-      "tokens_saved": 1,
-      "token_reduction_pct": 0.37,
+      "original_tokens": 247,
+      "optimized_tokens": 247,
+      "tokens_saved": 0,
+      "token_reduction_pct": 0.0,
       "cache_hit": true,
       "transformers": [
         "stripped_trailing_whitespace"
@@ -252,10 +252,10 @@
       "original_bytes": 835,
       "optimized_bytes": 834,
       "bytes_removed": 1,
-      "original_tokens": 257,
-      "optimized_tokens": 256,
-      "tokens_saved": 1,
-      "token_reduction_pct": 0.39,
+      "original_tokens": 229,
+      "optimized_tokens": 229,
+      "tokens_saved": 0,
+      "token_reduction_pct": 0.0,
       "cache_hit": true,
       "transformers": [
         "stripped_trailing_whitespace"
@@ -269,10 +269,10 @@
       "original_bytes": 421,
       "optimized_bytes": 269,
       "bytes_removed": 152,
-      "original_tokens": 116,
-      "optimized_tokens": 69,
-      "tokens_saved": 47,
-      "token_reduction_pct": 40.52,
+      "original_tokens": 115,
+      "optimized_tokens": 73,
+      "tokens_saved": 42,
+      "token_reduction_pct": 36.52,
       "cache_hit": true,
       "transformers": [
         "minified_json"

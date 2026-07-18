@@ -79,7 +79,7 @@ class ProxyMetrics:
     thread), read from ``/internal/stats`` on the event loop.
     """
 
-    __slots__ = ("_lock", "_successful_retries", "_failed_retries", "_transport_failures")
+    __slots__ = ("_failed_retries", "_lock", "_successful_retries", "_transport_failures")
 
     def __init__(self) -> None:
         self._lock = threading.Lock()

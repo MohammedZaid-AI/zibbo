@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an improvement or a new capability.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Zibbo makes hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: determinism
+    attributes:
+      label: Fit with Zibbo's guarantees
+      description: Zibbo is deterministic and never uses an LLM to optimize. Please confirm.
+      options:
+        - label: This does not require an LLM or any non-deterministic behavior to optimize content.

@@ -60,9 +60,7 @@ def test_exact_duplicate_paragraph_removed() -> None:
 
 
 def test_exact_duplicate_bullets_under_same_heading_removed() -> None:
-    source = (
-        "Rules:\n\n- Keep tests green.\n- Keep tests green.\n- Do not touch the schema."
-    )
+    source = "Rules:\n\n- Keep tests green.\n- Keep tests green.\n- Do not touch the schema."
     assert _prompt(source) == "Rules:\n\n- Keep tests green.\n- Do not touch the schema."
 
 
@@ -73,9 +71,7 @@ def test_exact_duplicate_bullets_under_same_heading_removed() -> None:
 
 def test_identical_bullets_under_different_headings_are_kept() -> None:
     """Section-scoped: the same words mean different things under different headings."""
-    source = (
-        "Frontend tasks:\n\n- Add a button.\n\nBackend tasks:\n\n- Add a button."
-    )
+    source = "Frontend tasks:\n\n- Add a button.\n\nBackend tasks:\n\n- Add a button."
     assert _prompt(source) == source
 
 
@@ -212,9 +208,7 @@ def test_low_duplicate_prose_is_not_detected() -> None:
 
 
 def test_code_paste_is_not_detected_as_prompt() -> None:
-    code = (
-        "def handler(event):\n    return event\n\nclass Service:\n    pass\n" * 40
-    )
+    code = "def handler(event):\n    return event\n\nclass Service:\n    pass\n" * 40
     assert _detector().detect(code).content_type is not ContentType.PROMPT
 
 

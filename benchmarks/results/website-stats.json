@@ -1,10 +1,10 @@
 {
-  "average_token_reduction_pct": 29.91,
-  "overall_token_reduction_pct": 41.16,
-  "average_transformation_ms": 0.837,
-  "cost_reduction_pct": 41.17,
+  "average_token_reduction_pct": 28.41,
+  "overall_token_reduction_pct": 40.58,
+  "average_transformation_ms": 3.65,
+  "cost_reduction_pct": 40.58,
   "cache_hit_rate": 1.0,
-  "cost_saved_usd_per_run": 0.004548,
+  "cost_saved_usd_per_run": 0.003913,
   "top_transformers": [
     {
       "name": "stripped_trailing_whitespace",
@@ -30,15 +30,15 @@
   "most_improved_file_types": [
     {
       "content_type": "html",
-      "avg_token_reduction_pct": 75.19
+      "avg_token_reduction_pct": 77.33
     },
     {
       "content_type": "json",
-      "avg_token_reduction_pct": 49.0
+      "avg_token_reduction_pct": 43.02
     },
     {
       "content_type": "text",
-      "avg_token_reduction_pct": 0.34
+      "avg_token_reduction_pct": 0.08
     }
   ]
 }

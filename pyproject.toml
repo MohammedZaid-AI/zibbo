@@ -5,10 +5,23 @@ build-backend = "hatchling.build"
 [project]
 name = "zibbo"
 version = "0.1.0"
-description = "AI gateway and deterministic content-optimization proxy for LLM providers."
+description = "A deterministic context optimization engine for AI coding assistants. Strips structural noise from requests before they reach the model — no LLM in the loop, source code never touched."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
+authors = [{ name = "Mohammed Zaid" }]
+keywords = ["llm", "tokens", "proxy", "claude-code", "coding-assistant", "context-optimization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Utilities",
+]
 
 dependencies = [
     "fastapi>=0.115.0",
@@ -50,6 +63,12 @@ dev = [
     # Property-based tests: determinism and idempotency of every transformer.
     "hypothesis>=6.100.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/MohammedZaid-AI/zibbo"
+Repository = "https://github.com/MohammedZaid-AI/zibbo"
+Issues = "https://github.com/MohammedZaid-AI/zibbo/issues"
+Changelog = "https://github.com/MohammedZaid-AI/zibbo/blob/main/CHANGELOG.md"
 
 [project.scripts]
 # The terminal client the Claude Code / Codex plugins shell out to. Stdlib-only, so it
