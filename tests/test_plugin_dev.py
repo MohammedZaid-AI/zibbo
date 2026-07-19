@@ -67,6 +67,9 @@ def test_per_action_command_files_exist_and_are_clean() -> None:
         "disable",
         "claude",
         "start",
+        "stop",
+        "connect",
+        "disconnect",
     }
     present = {path.stem for path in commands.glob("*.md")}
     assert expected <= present, f"missing per-action commands: {expected - present}"

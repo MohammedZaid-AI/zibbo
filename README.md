@@ -121,25 +121,36 @@ numbers convince you, route for real (below).
 
 ---
 
-## Start
+## Connect
 
-`zibbo start` runs the gateway and points Claude Code at it. You do not edit a
-settings file by hand.
+`zibbo connect` runs the gateway and routes Claude Code through it. You do not
+edit a settings file by hand.
 
 ```bash
-zibbo start
+zibbo connect
 ```
 
 ```text
-✓ Gateway started (http://127.0.0.1:8000)
-✓ Claude Code configured  (.claude/settings.local.json)
+✓ Gateway running (http://127.0.0.1:8000)
+✓ Claude Code configured  (~/.claude/settings.json)
 
   Restart Claude Code for routing to take effect.
 ```
 
+It writes `ANTHROPIC_BASE_URL` into your **global** Claude Code settings
+(`~/.claude/settings.json`), which both the CLI and the **VS Code extension** read
+regardless of which folder is open — so a shell `export` isn't needed (and doesn't
+reach the VS Code extension anyway). Use `zibbo connect --project` to scope routing
+to the current workspace instead, and `zibbo disconnect` to undo it. `zibbo start`
+does the same thing.
+
 For any other assistant, set its base URL to Zibbo — `…/v1` for OpenAI-style
 clients, `…/anthropic` for Anthropic-style. Your API key is forwarded untouched;
 requests bill your own account.
+
+> **Not routed after connecting?** Restart your assistant (settings are read at
+> launch), then check `zibbo status` → **Routing: Observed → Active**. If it's still
+> off, run `zibbo doctor --fix`.
 
 ---
 

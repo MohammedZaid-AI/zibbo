@@ -266,3 +266,49 @@ def test_stop_gateway_does_not_signal_a_stale_or_reused_pid(tmp_path: Path) -> N
     finally:
         innocent.terminate()
         innocent.wait(timeout=5)
+
+
+# -- Scope: user (global) vs project (workspace) -----------------------------
+
+
+def test_settings_target_resolves_user_and_project(tmp_path: Path) -> None:
+    assert lifecycle.settings_target("user") == Path.home() / ".claude" / "settings.json"
+    assert (
+        lifecycle.settings_target("project", cwd=tmp_path)
+        == tmp_path / ".claude" / "settings.local.json"
+    )
+    # The default scope is user (global) — the target the VS Code extension reads regardless
+    # of which folder is open.
+    assert lifecycle.settings_target() == lifecycle.user_settings_target()
+
+
+def test_routing_defaults_to_user_scope_and_project_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """configure/restore honor scope, and effective_persisted_base_url reflects Claude Code's
+    precedence (project overrides user) so status reports routing from either scope."""
+    user = tmp_path / "home" / ".claude" / "settings.json"
+    proj = tmp_path / "proj" / ".claude" / "settings.local.json"
+    monkeypatch.setattr(lifecycle, "user_settings_target", lambda: user)
+    monkeypatch.setattr(lifecycle, "project_settings_target", lambda cwd=None: proj)
+
+    assert lifecycle.effective_persisted_base_url() is None
+
+    # Default scope is user (global).
+    lifecycle.configure_routing(ROUTED)
+    assert json.loads(user.read_text(encoding="utf-8"))["env"]["ANTHROPIC_BASE_URL"] == ROUTED
+    assert not proj.exists()
+    assert lifecycle.effective_persisted_base_url() == ROUTED
+
+    # A project-scoped value overrides the user one in Claude Code's precedence.
+    other = "http://127.0.0.1:9999/anthropic"
+    lifecycle.configure_routing(other, scope="project")
+    assert json.loads(proj.read_text(encoding="utf-8"))["env"]["ANTHROPIC_BASE_URL"] == other
+    assert lifecycle.effective_persisted_base_url() == other
+
+    # Disconnecting the project scope falls back to the still-configured user scope.
+    lifecycle.restore_routing(scope="project")
+    assert lifecycle.effective_persisted_base_url() == ROUTED
+    # Disconnecting user leaves nothing.
+    lifecycle.restore_routing(scope="user")
+    assert lifecycle.effective_persisted_base_url() is None

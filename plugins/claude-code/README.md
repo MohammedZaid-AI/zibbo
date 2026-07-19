@@ -122,7 +122,10 @@ begin with `/zibbo:`. Type `/zibbo` and the autocomplete lists them all — noth
 | `/zibbo:logs` | Recent optimization activity (metadata only — never prompt contents) |
 | `/zibbo:claude` | Claude Code activation status from the gateway's point of view |
 | `/zibbo:enable` / `/zibbo:disable` | Turn transformations on/off at runtime |
-| `/zibbo:start` | Start the gateway if it is not already running |
+| `/zibbo:connect` | Start the gateway and route Claude Code through it — recommended onboarding (global by default; `--project` for this workspace only) |
+| `/zibbo:disconnect` | Stop routing Claude Code through Zibbo (the gateway keeps running) |
+| `/zibbo:start` | Start the gateway and route Claude Code through it |
+| `/zibbo:stop` | Stop the gateway and restore your assistant's endpoint |
 
 The dashboard command also accepts an argument, so `/zibbo:zibbo stats` is equivalent to
 `/zibbo:stats`.

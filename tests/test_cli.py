@@ -372,7 +372,8 @@ def test_render_banner_one_step_left_never_mentions_api_keys() -> None:
     )
     assert "one step left" in out
     assert "authenticated correctly" in out
-    assert "export ANTHROPIC_BASE_URL=http://localhost:8000/anthropic" in out
+    assert "zibbo connect" in out  # the one-command fix, not a manual export
+    assert "export ANTHROPIC_BASE_URL" not in out  # doesn't reach the VS Code extension
     assert "API key" not in out  # a subscription user is never told to make one
 
 
@@ -572,4 +573,4 @@ def test_routing_help_never_mentions_api_keys() -> None:
         )
     )
     assert "api key" not in text.lower()
-    assert "export ANTHROPIC_BASE_URL=http://localhost:8000/anthropic" in text
+    assert "zibbo connect" in text  # the one-command fix, not a manual export

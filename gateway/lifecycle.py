@@ -27,12 +27,14 @@ import signal
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from gateway.claude_env import ANTHROPIC_PREFIX
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+Scope = Literal["user", "project"]
 
 # The single Claude-specific assumption the requirements permit. Kept as one named constant
 # so the provider-agnostic boundary is auditable at a glance.
@@ -50,15 +52,29 @@ class SettingsError(Exception):
 # -- Locating the settings file ----------------------------------------------
 
 
-def default_settings_target(cwd: Path | None = None) -> Path:
-    """The file ``start``/``stop`` write: Claude Code's project-local settings.
+def user_settings_target() -> Path:
+    """Global Claude Code settings — ``~/.claude/settings.json``.
 
-    This is the highest-precedence *writable* layer Claude Code merges (above user and
-    project-shared settings, below managed policy), so routing set here wins regardless of
-    what the other layers contain. Injected in tests; defaults to the current project.
+    Read by both the CLI and the VS Code extension regardless of the working directory or
+    which folder the editor has open, so routing set here reaches the extension reliably.
+    This is the default onboarding scope.
+    """
+    return Path.home() / ".claude" / "settings.json"
+
+
+def project_settings_target(cwd: Path | None = None) -> Path:
+    """Project-local Claude Code settings — ``<cwd>/.claude/settings.local.json``.
+
+    The highest-precedence writable layer, but only in effect when the editor's open
+    workspace *is* this folder — so it is opt-in (``--project``), not the default.
     """
     cwd = Path.cwd() if cwd is None else cwd
     return cwd / ".claude" / "settings.local.json"
+
+
+def settings_target(scope: Scope = "user", *, cwd: Path | None = None) -> Path:
+    """The settings file for ``scope``: ``user`` (global) or ``project`` (workspace-local)."""
+    return user_settings_target() if scope == "user" else project_settings_target(cwd)
 
 
 def backup_path(target: Path) -> Path:
@@ -160,14 +176,17 @@ class ConfigureResult:
     already_routed: bool  # it already pointed at this gateway; nothing changed
 
 
-def configure_routing(base_url: str, *, target: Path | None = None) -> ConfigureResult:
+def configure_routing(
+    base_url: str, *, scope: Scope = "user", target: Path | None = None
+) -> ConfigureResult:
     """Point Claude Code at ``base_url`` by merging ``ANTHROPIC_BASE_URL`` into settings.
 
-    Transactional: a verbatim backup is taken before the first modification, and any write
-    failure restores the prior on-disk state before raising. Only the one env key is
+    Writes the ``user`` (global) settings by default, or ``project`` (workspace-local) when
+    asked. Transactional: a verbatim backup is taken before the first modification, and any
+    write failure restores the prior on-disk state before raising. Only the one env key is
     touched — every other setting and env var is preserved.
     """
-    target = default_settings_target() if target is None else target
+    target = settings_target(scope) if target is None else target
     data, existed = _load(target)  # raises SettingsError on invalid JSON — no change made
 
     env = _env_block(data)
@@ -221,14 +240,14 @@ class RestoreResult:
     changed: bool  # the file was actually modified
 
 
-def restore_routing(*, target: Path | None = None) -> RestoreResult:
+def restore_routing(*, scope: Scope = "user", target: Path | None = None) -> RestoreResult:
     """Reverse :func:`configure_routing`: put back the previous ``ANTHROPIC_BASE_URL`` (read
     from the backup), or remove only the variable Zibbo added. No other setting is touched.
 
     Surgical on purpose — it edits just the one env key in the *current* file rather than
     restoring the whole backup, so settings the user changed while routing was active survive.
     """
-    target = default_settings_target() if target is None else target
+    target = settings_target(scope) if target is None else target
     backup = backup_path(target)
     state = _read_state(backup)
     if state is None:
@@ -267,20 +286,29 @@ def restore_routing(*, target: Path | None = None) -> RestoreResult:
     )
 
 
-def persisted_base_url(*, target: Path | None = None) -> str | None:
-    """The ``ANTHROPIC_BASE_URL`` currently written in the settings file, if any.
+def persisted_base_url(*, scope: Scope = "user", target: Path | None = None) -> str | None:
+    """The ``ANTHROPIC_BASE_URL`` written in the ``scope`` settings file, if any.
 
-    Reflects the persisted routing intent (what Claude Code will use next launch), which is
-    what ``zibbo status`` reports. Returns ``None`` on a missing/invalid/unset file — status
-    must never raise.
+    Reflects the persisted routing intent (what Claude Code will use next launch). Returns
+    ``None`` on a missing/invalid/unset file — status must never raise.
     """
-    target = default_settings_target() if target is None else target
+    target = settings_target(scope) if target is None else target
     try:
         data, _ = _load(target)
     except SettingsError:
         return None
     value = _env_block(data).get(ENV_BASE_URL)
     return value if isinstance(value, str) else None
+
+
+def effective_persisted_base_url() -> str | None:
+    """The ``ANTHROPIC_BASE_URL`` Claude Code will actually use, checking both scopes.
+
+    Project-local settings override user settings in Claude Code's precedence, so a value
+    there wins; otherwise the global user value applies. Used by ``zibbo status`` so it
+    reports routing correctly no matter which scope onboarding used.
+    """
+    return persisted_base_url(scope="project") or persisted_base_url(scope="user")
 
 
 # -- Gateway process state (PID file) ----------------------------------------

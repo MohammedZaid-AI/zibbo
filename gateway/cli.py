@@ -221,7 +221,7 @@ def _routing_help(auth: dict[str, Any], routing: dict[str, Any]) -> list[str]:
         out.append("  Route Claude Code through Zibbo. Run:")
     out += [
         "",
-        f"    export ANTHROPIC_BASE_URL={routing['expected_base_url']}",
+        "    zibbo connect",
         "",
         "  Then restart Claude Code.",
     ]
@@ -711,7 +711,7 @@ def _cmd_status(client: Client, _args: argparse.Namespace) -> int:
     provider = "Anthropic" if routed else (", ".join(p["name"] for p in providers) or "none")
     # The persisted routing intent (what Claude Code will use next launch) is the settings
     # file, not this shell's env — so status reflects reality across restarts.
-    persisted = lifecycle.persisted_base_url()
+    persisted = lifecycle.effective_persisted_base_url()
     gateway_route = lifecycle.desired_base_url(client.base_url)
     env_base = os.environ.get("ANTHROPIC_BASE_URL")
     current_endpoint = persisted or env_base or lifecycle.DIRECT_ENDPOINT
@@ -907,7 +907,7 @@ def _build_doctor_checks(client: Client) -> list[dict[str, Any]]:
     )
 
     routing = detect_routing(os.environ, client.base_url)
-    routing_fix = f"export ANTHROPIC_BASE_URL={routing.expected_base_url} , then relaunch"
+    routing_fix = "run  zibbo connect  (or  zibbo doctor --fix ), then restart Claude Code"
     checks.append(
         _check(
             "routing",
@@ -920,14 +920,17 @@ def _build_doctor_checks(client: Client) -> list[dict[str, Any]]:
     )
 
     base_set = "ANTHROPIC_BASE_URL" in os.environ
+    persisted = lifecycle.effective_persisted_base_url()
     checks.append(
         _check(
             "environment variables",
-            "ok" if base_set else "warn",
-            "ANTHROPIC_BASE_URL set" if base_set else "ANTHROPIC_BASE_URL not set",
-            problem=None if base_set else "the routing variable is missing",
-            reason=None if base_set else "Claude Code will talk to Anthropic directly",
-            fix=None if base_set else f"export ANTHROPIC_BASE_URL={routing.expected_base_url}",
+            "ok" if base_set or persisted else "warn",
+            "ANTHROPIC_BASE_URL set"
+            if base_set
+            else ("configured in settings.json (restart to apply)" if persisted else "not set"),
+            problem=None if base_set or persisted else "the routing variable is not configured",
+            reason=None if base_set or persisted else "Claude Code will talk to Anthropic directly",
+            fix=None if base_set or persisted else "run  zibbo connect",
         )
     )
 
@@ -957,8 +960,15 @@ def _build_doctor_checks(client: Client) -> list[dict[str, Any]]:
     return checks
 
 
-def _cmd_doctor(client: Client, _args: argparse.Namespace) -> int:
+def _cmd_doctor(client: Client, args: argparse.Namespace) -> int:
     checks = _build_doctor_checks(client)
+    if getattr(args, "fix", False):
+        routing_ok = any(c["name"] == "routing" and c["status"] == "ok" for c in checks)
+        if routing_ok:
+            print(f"{_TICK} Routing is already configured — nothing to fix.\n")
+        else:
+            print("Routing Claude Code through Zibbo…\n")
+            return _connect(client, args)  # writes settings, prints result + restart hint
     healthy = all(check["status"] != "fail" for check in checks)
     print(render_doctor({"healthy": healthy, "checks": checks}))
     return 0 if healthy else 1
@@ -1231,21 +1241,28 @@ def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
     return 1
 
 
-def _cmd_start(client: Client, args: argparse.Namespace) -> int:
+def _connect(client: Client, args: argparse.Namespace) -> int:
     """Bring the gateway up *and* route Claude Code through it, transactionally.
 
     Config is written only after the gateway answers its health check, so a failed startup
-    never leaves Claude Code pointed at a dead endpoint. If the config write itself fails,
-    a gateway we started this call is stopped again — everything succeeds or nothing persists.
+    never leaves Claude Code pointed at a dead endpoint. If the config write itself fails, a
+    gateway we started this call is stopped again — everything succeeds or nothing persists.
+
+    Routing is written to the global user settings by default, which the VS Code extension
+    and the CLI both read regardless of which folder is open; ``--project`` scopes it to the
+    current workspace instead.
     """
+    scope: lifecycle.Scope = "project" if getattr(args, "project", False) else "user"
     was_running = client.reachable()
-    rc = _start_gateway(client, port=args.port, announce=False)
+    rc = _start_gateway(client, port=getattr(args, "port", None), announce=False)
     if rc != 0:
         return rc  # startup failed/timed out — settings untouched, nothing to roll back
     started_now = not was_running
 
     try:
-        result = lifecycle.configure_routing(lifecycle.desired_base_url(client.base_url))
+        result = lifecycle.configure_routing(
+            lifecycle.desired_base_url(client.base_url), scope=scope
+        )
     except lifecycle.SettingsError as exc:
         if started_now:
             lifecycle.stop_gateway(client.reachable)  # roll back the process we just started
@@ -1253,13 +1270,42 @@ def _cmd_start(client: Client, args: argparse.Namespace) -> int:
         print("    Gateway not left routed. Fix the settings file and retry.", file=sys.stderr)
         return 1
 
-    print(f"{_TICK} Gateway started ({client.base_url})")
+    print(f"{_TICK} Gateway running ({client.base_url})")
     if result.already_routed:
-        print(f"{_TICK} Claude Code already configured")
+        print(f"{_TICK} Claude Code already routed through Zibbo")
     else:
         print(f"{_TICK} Claude Code configured  ({result.settings_path})")
     print()
     print("  Restart Claude Code for routing to take effect.")
+    return 0
+
+
+def _cmd_start(client: Client, args: argparse.Namespace) -> int:
+    """Start the gateway and route Claude Code through it (alias-friendly to ``connect``)."""
+    return _connect(client, args)
+
+
+def _cmd_connect(client: Client, args: argparse.Namespace) -> int:
+    """One-command onboarding: start the gateway and route Claude Code through it."""
+    return _connect(client, args)
+
+
+def _cmd_disconnect(client: Client, args: argparse.Namespace) -> int:
+    """Stop routing Claude Code through Zibbo, leaving the gateway running."""
+    scope: lifecycle.Scope = "project" if getattr(args, "project", False) else "user"
+    try:
+        restore = lifecycle.restore_routing(scope=scope)
+    except lifecycle.SettingsError as exc:
+        print(f"{_CROSS} could not restore Claude Code settings: {exc}", file=sys.stderr)
+        return 1
+    if restore.restored_to:
+        print(f"{_TICK} Claude Code restored  (ANTHROPIC_BASE_URL -> {restore.restored_to})")
+    elif restore.changed:
+        print(f"{_TICK} Routing removed  (Claude Code back on the default endpoint)")
+    else:
+        print(f"{_TICK} Claude Code was not routed through Zibbo")
+    print()
+    print("  The gateway is still running. Restart Claude Code to return to the normal endpoint.")
     return 0
 
 
@@ -1313,6 +1359,8 @@ _COMMANDS = {
     "version": _cmd_version,
     "start": _cmd_start,
     "stop": _cmd_stop,
+    "connect": _cmd_connect,
+    "disconnect": _cmd_disconnect,
 }
 
 
@@ -1331,7 +1379,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("claude", help="Claude Code activation status (gateway view)")
     sub.add_parser("stats", help="optimization statistics")
-    sub.add_parser("doctor", help="run diagnostics")
+    doctor = sub.add_parser("doctor", help="run diagnostics")
+    doctor.add_argument(
+        "--fix", action="store_true", help="route Claude Code through Zibbo if it isn't already"
+    )
     enable = sub.add_parser("enable", help="enable transformations (or a feature: prompt)")
     enable.add_argument("feature", nargs="?", help="feature to enable, e.g. prompt")
     disable = sub.add_parser("disable", help="disable transformations (or a feature: prompt)")
@@ -1371,8 +1422,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     start = sub.add_parser("start", help="start the gateway and route Claude Code through it")
     start.add_argument("--port", type=int, help="port to start on (sets ZIBBO_PORT)")
+    start.add_argument(
+        "--project", action="store_true", help="route this workspace only, not globally"
+    )
 
     sub.add_parser("stop", help="stop the gateway and restore Claude Code's endpoint")
+
+    connect = sub.add_parser(
+        "connect", help="start the gateway and route Claude Code through it (recommended)"
+    )
+    connect.add_argument("--port", type=int, help="port to start on (sets ZIBBO_PORT)")
+    connect.add_argument(
+        "--project", action="store_true", help="route this workspace only, not globally"
+    )
+
+    disconnect = sub.add_parser(
+        "disconnect", help="stop routing Claude Code through Zibbo (gateway keeps running)"
+    )
+    disconnect.add_argument(
+        "--project", action="store_true", help="undo project-scoped routing instead of global"
+    )
 
     return parser
 
