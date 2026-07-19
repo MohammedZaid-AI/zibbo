@@ -41,9 +41,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ZIBBO_HOST=0.0.0.0 \
     ZIBBO_PORT=8000
 
-# libxml2/libxslt runtime libraries for lxml's C extension.
+# libxml2/libxslt: runtime libraries for lxml's C extension.
+# ca-certificates: the upstream client verifies TLS against the OS trust store
+# (truststore), and on Linux that store *is* /etc/ssl/certs — truststore ships no
+# bundle of its own here. Make the dependency explicit so image TLS never silently
+# depends on the base image bundling it; an operator can also drop a corporate /
+# proxy CA into /usr/local/share/ca-certificates and update-ca-certificates to have
+# it trusted, which a certifi-only client would ignore. See _upstream_ssl_context.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y libxml2 libxslt1.1 \
+    && apt-get install --no-install-recommends -y ca-certificates libxml2 libxslt1.1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 1001 gateway \

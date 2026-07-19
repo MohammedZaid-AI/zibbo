@@ -6,6 +6,7 @@ application without touching the environment or the settings cache.
 
 from __future__ import annotations
 
+import ssl
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -72,6 +73,32 @@ No LLM is used to optimize. No content is summarized. Meaning is preserved.
 """
 
 
+def _upstream_ssl_context() -> ssl.SSLContext | bool:
+    """Verify upstream TLS against the OS trust store, not only certifi's public roots.
+
+    Corporate proxies and antivirus HTTPS inspection (Avast Web Shield, Zscaler, and the
+    like) re-sign upstream certificates with a locally installed CA. That CA lives in the
+    OS trust store — where the operating system and other tools find it, including Claude
+    Code via ``NODE_EXTRA_CA_CERTS`` — but not in certifi's bundle. A certifi-only client
+    then rejects every HTTPS connection with "unable to get local issuer certificate", so
+    the gateway cannot reach the provider even though the assistant can. ``truststore``
+    points Python's TLS at the same OS store, so the gateway trusts exactly what the
+    machine already trusts, on Windows, macOS and Linux alike.
+
+    Imported lazily and with a fallback: if ``truststore`` is somehow absent (an install
+    predating this dependency), verifying against certifi is the previous behavior — the
+    gateway still starts rather than crashing at import time.
+    """
+    try:
+        import truststore
+    except ImportError:
+        logger.warning(
+            "truststore_unavailable", detail="verifying upstream TLS against certifi only"
+        )
+        return True
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
 def build_upstream_client(settings: Settings) -> httpx.AsyncClient:
     """One connection pool for the whole process.
 
@@ -80,6 +107,7 @@ def build_upstream_client(settings: Settings) -> httpx.AsyncClient:
     transparent proxy hands the 3xx to the caller and lets the SDK decide.
     """
     return httpx.AsyncClient(
+        verify=_upstream_ssl_context(),
         timeout=httpx.Timeout(
             connect=settings.upstream_connect_timeout_seconds,
             read=settings.upstream_read_timeout_seconds,

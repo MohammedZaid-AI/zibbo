@@ -186,6 +186,31 @@ ZIBBO_GROQ_API_KEY=gsk_...
 ZIBBO_OLLAMA_BASE_URL=http://localhost:11434/v1   # no key needed
 ```
 
+## Upstream TLS verification
+
+The upstream client verifies every provider certificate against the **operating
+system trust store** — the same anchors `curl`, the OS, and Claude Code itself use —
+rather than only certifi's bundled public roots. Verification is never disabled;
+`truststore` performs full certificate-chain and hostname checks (`CERT_REQUIRED`).
+
+This is what lets the gateway run where the assistant already does. HTTPS-inspection
+software — Avast Web Shield, Zscaler, Netskope, a corporate proxy — re-signs upstream
+certificates with a CA it installs in the OS trust store. certifi does not know that
+CA, so a certifi-only client rejects every handshake (`CERTIFICATE_VERIFY_FAILED`) and
+every request 502s, even though the assistant on the same machine works. Trusting the
+OS store means the gateway trusts exactly what the machine trusts.
+
+If `truststore` is somehow unavailable, the client falls back to certifi verification
+(still full validation, never `verify=False`).
+
+**Deployment note.** On Linux, "OS trust store" is the system CA bundle
+(`/etc/ssl/certs`), which `truststore` reads via OpenSSL — it ships no bundle of its
+own there. The provided Docker image installs `ca-certificates` for this reason; a
+self-built minimal image (distroless, `scratch`, stripped Alpine) must include a
+system CA bundle, as any TLS client would require. Operators behind an inspecting
+proxy add their CA to that store (`/usr/local/share/ca-certificates` +
+`update-ca-certificates`) and the gateway trusts it — no code or config change.
+
 ## Compatibility guarantees
 
 Verified with each provider's official SDK, whose only non-default argument is
