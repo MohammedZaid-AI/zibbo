@@ -57,7 +57,6 @@ Source files are a different story — and Zibbo says so:
 ```
    main.py (247 tokens)  ──────►  main.py (247 tokens)     0% change
 ```
-
 ---
 
 ## How it works
