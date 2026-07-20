@@ -7,11 +7,14 @@ need a socket — the renderers (which the plugins ultimately display) and disco
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 
 import pytest
 
+from gateway import __main__ as gateway_main
 from gateway import cli
+from tests.conftest import build_settings
 
 _STATUS = {
     "name": "zibbo",
@@ -574,3 +577,55 @@ def test_routing_help_never_mentions_api_keys() -> None:
     )
     assert "api key" not in text.lower()
     assert "zibbo connect" in text  # the one-command fix, not a manual export
+
+
+# -- Startup diagnostics: the CLI must never hide why the gateway failed to start --------
+
+
+def test_port_is_occupied_detects_a_listening_socket() -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        assert cli._port_is_occupied(f"http://127.0.0.1:{port}") is True
+    # Socket closed — nothing listens, so the port reads free again.
+    assert cli._port_is_occupied(f"http://127.0.0.1:{port}") is False
+
+
+def test_report_startup_failure_surfaces_exit_code_and_log_tail(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    log = tmp_path / "gateway.log"
+    log.write_text("Traceback (most recent call last):\nValueError: boom\n", encoding="utf-8")
+    cli._report_startup_failure(log, exit_code=1)
+    err = capsys.readouterr().err
+    # The crash reason is shown, not a bare timeout — the whole point of the fix.
+    assert "exit code 1" in err
+    assert "ValueError: boom" in err
+    assert str(log) in err
+
+
+def test_report_startup_failure_timeout_says_not_ready(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    log = tmp_path / "gateway.log"
+    log.write_text("still starting...\n", encoding="utf-8")
+    cli._report_startup_failure(log, exit_code=None)  # alive but never answered
+    err = capsys.readouterr().err
+    assert "did not become ready" in err
+    assert "still starting" in err
+
+
+def test_reload_disabled_when_env_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A detached daemon (zibbo start sets ZIBBO_RELOAD=false) must not autoreload, even in
+    # development, or its reload worker is orphaned under DETACHED_PROCESS and the server dies.
+    from gateway.config import Environment
+
+    dev = build_settings(environment=Environment.DEVELOPMENT)
+    monkeypatch.setenv("ZIBBO_RELOAD", "false")
+    assert gateway_main._reload_enabled(dev) is False  # override wins over development
+    monkeypatch.setenv("ZIBBO_RELOAD", "true")
+    assert gateway_main._reload_enabled(dev) is True
+    monkeypatch.delenv("ZIBBO_RELOAD", raising=False)
+    assert gateway_main._reload_enabled(dev) is True  # development default, no override
+    assert gateway_main._reload_enabled(build_settings()) is False  # non-development: off

@@ -320,6 +320,12 @@ def pidfile_path() -> Path:
     return Path.home() / ".zibbo" / "gateway.json"
 
 
+def startup_log_path() -> Path:
+    """Where a gateway *we start* writes its stdout/stderr, so ``zibbo start`` can show a
+    startup crash instead of a bare timeout. Truncated on each start; sits by the PID file."""
+    return Path.home() / ".zibbo" / "gateway.log"
+
+
 def write_pidfile(pid: int, base_url: str, *, path: Path | None = None) -> None:
     path = pidfile_path() if path is None else path
     try:

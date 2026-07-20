@@ -23,12 +23,14 @@ import argparse
 import contextlib
 import json
 import os
+import socket
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 import gateway
 from gateway import lifecycle, plugin_dev
@@ -1184,6 +1186,42 @@ def _cmd_version(client: Client, _args: argparse.Namespace) -> int:
     return 0
 
 
+def _port_is_occupied(base_url: str) -> bool:
+    """True if something is already listening on the gateway's host:port.
+
+    Callers check this only after ``reachable()`` has come back False, so an open port
+    means *another* process owns it. Binding a second server on top (Windows allows it via
+    ``SO_REUSEADDR``) would make the readiness probe hit the wrong server and never see
+    Zibbo — the exact way ``start`` used to hang. Refusing up front surfaces the real cause.
+    """
+    parts = urllib.parse.urlsplit(base_url)
+    host = parts.hostname or "127.0.0.1"
+    port = parts.port or 80
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex((host, port)) == 0
+
+
+def _report_startup_failure(log_path: Path, *, exit_code: int | None) -> None:
+    """Surface *why* startup failed — the child's own output — never just a bare timeout."""
+    if exit_code is not None:
+        print(
+            f"{_CROSS} gateway process exited during startup (exit code {exit_code})",
+            file=sys.stderr,
+        )
+    else:
+        print(f"{_CROSS} gateway did not become ready in time", file=sys.stderr)
+    tail: list[str] = []
+    with contextlib.suppress(OSError):
+        tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
+    if tail:
+        print("    ---- gateway output " + "-" * 39, file=sys.stderr)
+        for line in tail:
+            print(f"    {line}", file=sys.stderr)
+        print("    " + "-" * 59, file=sys.stderr)
+    print(f"    full log: {log_path}", file=sys.stderr)
+
+
 def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
     """Start the gateway if it is not already running, then wait for it to answer.
 
@@ -1195,6 +1233,13 @@ def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
         if announce:
             print(f"{_TICK} Zibbo already running at {client.base_url}")
         return 0
+    if _port_is_occupied(client.base_url):
+        print(
+            f"{_CROSS} {client.base_url} is already in use by another process that is not Zibbo.\n"
+            f"    Stop that process, or start Zibbo on another port:  ZIBBO_PORT=8123 zibbo start",
+            file=sys.stderr,
+        )
+        return 1
     try:
         import gateway  # noqa: F401 — verify the package is importable before spawning
     except ImportError:
@@ -1211,6 +1256,10 @@ def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
     env = dict(os.environ)
     if port:
         env["ZIBBO_PORT"] = str(port)
+    # This is a detached background daemon, so force uvicorn's autoreloader off: its reload
+    # supervisor's worker subprocess is orphaned/killed under DETACHED_PROCESS and the server
+    # would die right after startup. See gateway.__main__._reload_enabled.
+    env["ZIBBO_RELOAD"] = "false"
     creationflags = 0
     start_new_session = False
     if os.name == "nt":
@@ -1219,25 +1268,45 @@ def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
         )
     else:
         start_new_session = True
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "gateway"],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=creationflags,
-        start_new_session=start_new_session,
-    )
-    print(f"Starting Zibbo gateway{_ELLIPSIS}", file=sys.stderr)
-    for _ in range(50):  # up to ~10s
-        time.sleep(0.2)
-        if client.reachable():
-            # Record the PID we own so `zibbo stop` can terminate this exact process — and
-            # only this one. A gateway started another way leaves no PID file and is untouched.
-            lifecycle.write_pidfile(proc.pid, client.base_url)
-            if announce:
-                print(f"{_TICK} Zibbo running at {client.base_url}")
-            return 0
-    print(f"{_CROSS} gateway did not become ready in time", file=sys.stderr)
+
+    # Capture the child's stdout+stderr to a file (not DEVNULL) so a startup crash is
+    # visible, not swallowed. A file, not a PIPE: the gateway is detached and outlives this
+    # CLI, so a pipe would fill and block once we stop reading — a file the child keeps.
+    log_path = lifecycle.startup_log_path()
+    log_file: IO[str] | None = None
+    with contextlib.suppress(OSError):
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = log_path.open("w", encoding="utf-8")
+    stdout = log_file if log_file is not None else subprocess.DEVNULL
+    stderr = subprocess.STDOUT if log_file is not None else subprocess.DEVNULL
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "gateway"],
+            env=env,
+            stdout=stdout,
+            stderr=stderr,
+            creationflags=creationflags,
+            start_new_session=start_new_session,
+        )
+        print(f"Starting Zibbo gateway{_ELLIPSIS}", file=sys.stderr)
+        for _ in range(50):  # up to ~10s
+            if proc.poll() is not None:  # the gateway process died during startup
+                _report_startup_failure(log_path, exit_code=proc.returncode)
+                return 1
+            time.sleep(0.2)
+            if client.reachable():
+                # Record the PID we own so `zibbo stop` can terminate this exact process — and
+                # only this one. A gateway started another way leaves no PID file and is untouched.
+                lifecycle.write_pidfile(proc.pid, client.base_url)
+                if announce:
+                    print(f"{_TICK} Zibbo running at {client.base_url}")
+                return 0
+    finally:
+        # Close our handle; the detached child keeps its own inherited copy and its log.
+        if log_file is not None:
+            log_file.close()
+    _report_startup_failure(log_path, exit_code=None)
     return 1
 
 
