@@ -58,11 +58,28 @@ The CLI never assumes a URL. It resolves, in order:
 
 1. An explicit `--url`.
 2. `$ZIBBO_GATEWAY_URL`.
-3. A probe of `127.0.0.1:8000`, `:8080`, `:8123` — the first that answers
-   `/internal/version` wins.
+3. A configured port (`ZIBBO_PORT` in the environment or `.env`) — pinned directly,
+   because a configured port says exactly where the gateway will be.
+4. Otherwise a probe of `127.0.0.1:8000`, `:8080`, `:8123` — the first that answers
+   *as a Zibbo gateway* wins.
 
-This supports custom ports, custom hosts, and multiple gateway instances (point
-`ZIBBO_GATEWAY_URL` at the one you want).
+"Answers as a Zibbo gateway" is the **identity protocol**: `/internal/version` returns
+`service: "zibbo"`, and only that (with a temporary fallback to `internal_api_version`)
+counts as a match. An unrelated HTTP service on the port is rejected rather than mistaken
+for the gateway, and a non-JSON response is treated as "not Zibbo", never a crash.
+
+### One resolver — `gateway/endpoint.py`
+
+The port, the client-side base URL, the service identity, and the `ZIBBO_*` variable names
+all live in one stdlib-only module, `gateway.endpoint`. Both the dependency-free CLI and the
+server's `Settings` read the port from there with the same precedence — **environment
+variable > `.env` file > built-in default** — so the CLI resolves the *same* port the gateway
+binds. `.env` is parsed with python-dotenv, the identical engine pydantic-settings uses, so
+the two interpretations cannot drift. The server binds broadly (`0.0.0.0` in a container)
+while a client connects to loopback — the one place these hosts differ, and deliberately so.
+
+This supports custom ports (`ZIBBO_PORT` or `.env`), remote/alternate instances
+(`ZIBBO_GATEWAY_URL`), and multiple gateways on one box.
 
 ## The command system
 
