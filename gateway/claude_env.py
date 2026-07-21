@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
+from gateway import endpoint
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -219,7 +221,7 @@ def _netloc(url: str) -> str:
 
 def detect_routing(
     env: Mapping[str, str] | None = None,
-    gateway_base_url: str = "http://127.0.0.1:8000",
+    gateway_base_url: str = endpoint.DEFAULT_BASE_URL,
 ) -> RoutingInfo:
     """Compare ``ANTHROPIC_BASE_URL`` against the gateway to decide if we are in the path."""
     env = os.environ if env is None else env

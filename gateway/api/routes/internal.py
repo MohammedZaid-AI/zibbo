@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Request
 
+from gateway import endpoint
 from gateway.api.deps import (
     AnalyticsDep,
     CacheDep,
@@ -96,6 +97,7 @@ async def stats(analytics: AnalyticsDep, settings: SettingsDep) -> StatsResponse
 @router.get("/version", response_model=VersionResponse, summary="Version")
 async def version(settings: SettingsDep) -> VersionResponse:
     return VersionResponse(
+        service=endpoint.SERVICE_NAME,
         gateway_version=settings.app_version,
         internal_api_version=INTERNAL_API_VERSION,
         app_name=settings.app_name,

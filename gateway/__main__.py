@@ -6,6 +6,7 @@ import os
 
 import uvicorn
 
+from gateway import endpoint
 from gateway.config import Environment, Settings, get_settings
 
 
@@ -18,7 +19,7 @@ def _reload_enabled(settings: Settings) -> bool:
     and ``start`` would report a bare timeout. A developer running ``python -m gateway`` by
     hand sets nothing and still gets reload in development.
     """
-    override = os.environ.get("ZIBBO_RELOAD")
+    override = os.environ.get(endpoint.ENV_RELOAD)
     if override is not None:
         return override.strip().lower() in {"1", "true", "yes", "on"}
     return settings.environment is Environment.DEVELOPMENT

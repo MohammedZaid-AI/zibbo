@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import IO, TYPE_CHECKING, Any
 
 import gateway
-from gateway import lifecycle, plugin_dev
+from gateway import endpoint, lifecycle, plugin_dev
 from gateway.claude_env import detect_auth, detect_routing, read_claude_settings
 
 if TYPE_CHECKING:
@@ -41,9 +41,12 @@ if TYPE_CHECKING:
 
 _PLUGIN_VERSION = gateway.__version__
 
-DEFAULT_URL = "http://127.0.0.1:8000"
-_DISCOVERY_PORTS = (8000, 8080, 8123)
-_ENV_URL = "ZIBBO_GATEWAY_URL"
+# The gateway's location and identity resolve through gateway.endpoint — the single source
+# of truth shared with the server and Settings — so the CLI never re-derives a port or a
+# default that could drift from what the gateway actually binds.
+DEFAULT_URL = endpoint.DEFAULT_BASE_URL
+_DISCOVERY_PORTS = (endpoint.DEFAULT_PORT, 8080, 8123)
+_ENV_URL = endpoint.ENV_GATEWAY_URL
 _ENV_TOKEN = "ZIBBO_GATEWAY_TOKEN"  # noqa: S105 — an env var name, not a secret
 _ENV_DEBUG = "ZIBBO_DEBUG"
 
@@ -132,7 +135,7 @@ class Client:
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:  # noqa: S310
                 _debug(f"{method} {url} -> {response.status}")
-                return json.loads(response.read() or b"null")
+                raw = response.read()
         except urllib.error.HTTPError as exc:
             detail = _error_detail(exc)
             _debug(f"{method} {url} -> HTTP {exc.code}: {detail}")
@@ -140,6 +143,14 @@ class Client:
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             _debug(f"{method} {url} -> unreachable: {exc}")
             raise GatewayError(f"no gateway at {self._base} ({exc})") from exc
+        try:
+            # A server answered, but it may not be Zibbo — a stray dev server or an unrelated
+            # service on this port answers with HTML/plain text. Treat unparseable output as
+            # "not a gateway" rather than letting a JSONDecodeError crash every command.
+            return json.loads(raw or b"null")
+        except ValueError as exc:
+            _debug(f"{method} {url} -> non-JSON response: {exc}")
+            raise GatewayError(f"{self._base} answered but is not a Zibbo gateway") from exc
 
     def get(self, path: str) -> Any:
         return self._request("GET", path)
@@ -148,11 +159,20 @@ class Client:
         return self._request("POST", path, body)
 
     def reachable(self) -> bool:
+        """True only when *Zibbo* answers, not merely when the port is occupied.
+
+        Identity is confirmed against the gateway's own protocol contract
+        (:func:`gateway.endpoint.is_gateway_identity`): the ``service`` field on
+        ``/internal/version``, with a back-compat fallback to ``internal_api_version``. This
+        stops an unrelated HTTP service on the gateway's port from being mistaken for Zibbo
+        (a false positive that makes ``start`` claim "already running" and ``doctor`` report
+        a healthy gateway whose real routes then 404).
+        """
         try:
-            self.get("/internal/version")
+            payload = self.get("/internal/version")
         except GatewayError:
             return False
-        return True
+        return endpoint.is_gateway_identity(payload)
 
 
 def _error_detail(exc: urllib.error.HTTPError) -> str:
@@ -167,8 +187,18 @@ def _error_detail(exc: urllib.error.HTTPError) -> str:
     return exc.reason if isinstance(exc.reason, str) else "error"
 
 
+def default_gateway_url() -> str:
+    """The gateway's base URL, resolved through :mod:`gateway.endpoint` — the single source
+    of truth for its port (env > ``.env`` > default). ``start`` resolves its pre-flight port
+    check, its launch, and its readiness poll from this one place, so they can never target
+    different ports; discovery and the spawned gateway resolve it the same way.
+    """
+    return endpoint.default_base_url()
+
+
 def discover(explicit: str | None, token: str | None) -> Client:
-    """Find a reachable gateway: an explicit URL, then $ZIBBO_GATEWAY_URL, then probe.
+    """Find a reachable gateway: an explicit URL, then $ZIBBO_GATEWAY_URL, then a configured
+    port (env or ``.env``), then probe the common ports.
 
     Discovery rather than assumption — the spec's requirement. A returned client is not
     guaranteed reachable when an explicit URL was given (we honour the user's choice),
@@ -181,6 +211,13 @@ def discover(explicit: str | None, token: str | None) -> Client:
     if env:
         _debug(f"discovery: using ${_ENV_URL} {env}")
         return Client(env, token=token)
+    resolved = endpoint.resolve_port()
+    if resolved.configured:
+        # A configured port (env var or .env) pins where the gateway is; honour it over
+        # probing the usual ports, and name the source so a mismatch is diagnosable.
+        target = default_gateway_url()
+        _debug(f"discovery: honouring port from {resolved.source} -> {target}")
+        return Client(target, token=token)
     for port in _DISCOVERY_PORTS:
         candidate = Client(f"http://127.0.0.1:{port}", token=token)
         _debug(f"discovery: probing {candidate.base_url}")
@@ -738,7 +775,7 @@ def _cmd_banner(client: Client, args: argparse.Namespace) -> int:
     # The SessionStart hook runs `zibbo banner --start`: bring the gateway up (a no-op if
     # it is already running), then render. One executable, no shell chaining.
     if getattr(args, "start", False):
-        _start_gateway(client, port=None, announce=False)
+        _start_gateway(client, announce=False)
     status = _status_or_none(client)
     view = _activation_view(client, _claude_or_none(client))
     if status is None:
@@ -796,18 +833,32 @@ def _build_doctor_checks(client: Client) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
 
     reachable = client.reachable()
-    checks.append(
-        _check(
-            "connectivity",
-            "ok" if reachable else "fail",
-            f"gateway reachable at {client.base_url}"
-            if reachable
-            else f"no gateway at {client.base_url}",
-            problem=None if reachable else "the CLI cannot reach the gateway",
-            reason=None if reachable else "nothing is listening on the gateway URL",
-            fix=None if reachable else "run  zibbo start  (or set ZIBBO_GATEWAY_URL)",
+    if reachable:
+        checks.append(_check("connectivity", "ok", f"gateway reachable at {client.base_url}"))
+    elif _port_is_occupied(client.base_url):
+        # Something answers on the port, but it is not Zibbo — the case that used to read as a
+        # bare "no gateway". Name it so the fix (free the port or move Zibbo) is obvious.
+        checks.append(
+            _check(
+                "connectivity",
+                "fail",
+                f"a non-Zibbo service is listening on {client.base_url}",
+                problem="the gateway URL is occupied by another process",
+                reason="something answers on that port, but it is not the Zibbo gateway",
+                fix="stop that process, or point Zibbo elsewhere: ZIBBO_PORT=8123 zibbo start",
+            )
         )
-    )
+    else:
+        checks.append(
+            _check(
+                "connectivity",
+                "fail",
+                f"no gateway at {client.base_url}",
+                problem="the CLI cannot reach the gateway",
+                reason="nothing is listening on the gateway URL",
+                fix="run  zibbo start  (or set ZIBBO_GATEWAY_URL)",
+            )
+        )
 
     status = _status_or_none(client) if reachable else None
     claude = None
@@ -868,7 +919,6 @@ def _build_doctor_checks(client: Client) -> list[dict[str, Any]]:
                 "or run  zibbo enable prompt  (this session only)",
             )
         )
-        checks.append(_check("port", "ok", f"gateway on {client.base_url}"))
 
     if claude is not None:
         route = claude.get("anthropic_route")
@@ -933,6 +983,17 @@ def _build_doctor_checks(client: Client) -> list[dict[str, Any]]:
             problem=None if base_set or persisted else "the routing variable is not configured",
             reason=None if base_set or persisted else "Claude Code will talk to Anthropic directly",
             fix=None if base_set or persisted else "run  zibbo connect",
+        )
+    )
+
+    resolved = endpoint.resolve_port()
+    url_env = os.environ.get(_ENV_URL)
+    source = f"${_ENV_URL}" if url_env else f"port from {resolved.source}"
+    checks.append(
+        _check(
+            "configuration",
+            "ok",
+            f"gateway URL {client.base_url} ({source})",
         )
     )
 
@@ -1222,9 +1283,13 @@ def _report_startup_failure(log_path: Path, *, exit_code: int | None) -> None:
     print(f"    full log: {log_path}", file=sys.stderr)
 
 
-def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
+def _start_gateway(client: Client, *, announce: bool) -> int:
     """Start the gateway if it is not already running, then wait for it to answer.
 
+    The port comes from ``client.base_url`` (resolved by ``discover`` through
+    ``gateway.endpoint``). The child inherits this process's environment and working
+    directory, so its ``Settings`` resolve the identical port (env > ``.env`` > default) —
+    pre-flight check, launch, and readiness poll can never target different ports.
     ``announce`` prints success to stdout (the ``start`` command); the banner suppresses
     it so the started gateway shows up in the banner itself, not as chatter above it.
     Progress and errors always go to stderr. Returns 0 running, 1 not ready, 2 not installed.
@@ -1254,12 +1319,10 @@ def _start_gateway(client: Client, *, port: int | None, announce: bool) -> int:
     import subprocess
 
     env = dict(os.environ)
-    if port:
-        env["ZIBBO_PORT"] = str(port)
     # This is a detached background daemon, so force uvicorn's autoreloader off: its reload
     # supervisor's worker subprocess is orphaned/killed under DETACHED_PROCESS and the server
     # would die right after startup. See gateway.__main__._reload_enabled.
-    env["ZIBBO_RELOAD"] = "false"
+    env[endpoint.ENV_RELOAD] = "false"
     creationflags = 0
     start_new_session = False
     if os.name == "nt":
@@ -1323,7 +1386,7 @@ def _connect(client: Client, args: argparse.Namespace) -> int:
     """
     scope: lifecycle.Scope = "project" if getattr(args, "project", False) else "user"
     was_running = client.reachable()
-    rc = _start_gateway(client, port=getattr(args, "port", None), announce=False)
+    rc = _start_gateway(client, announce=False)
     if rc != 0:
         return rc  # startup failed/timed out — settings untouched, nothing to roll back
     started_now = not was_running
@@ -1520,6 +1583,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     command = args.command or "status"  # bare `zibbo` shows the dashboard
     _debug(f"command: {command}")
+    # --port is sugar for ZIBBO_PORT: fold it in before discovery so the pre-flight check,
+    # launch, and readiness poll all resolve one port from the single source (gateway.endpoint).
+    if getattr(args, "port", None):
+        os.environ[endpoint.ENV_PORT] = str(args.port)
     token = args.token or os.environ.get(_ENV_TOKEN)
     client = discover(args.url, token)
     handler = _COMMANDS[command]

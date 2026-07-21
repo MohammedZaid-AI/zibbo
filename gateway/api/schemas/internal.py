@@ -69,6 +69,10 @@ class StatsResponse(_Frozen):
 
 
 class VersionResponse(_Frozen):
+    service: str
+    """Fixed protocol identity (``zibbo``). The CLI matches on this to distinguish a real
+    gateway from an unrelated HTTP service on the same port; see gateway.endpoint."""
+
     gateway_version: str
     internal_api_version: str
     app_name: str

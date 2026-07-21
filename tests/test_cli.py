@@ -233,6 +233,28 @@ def test_discover_prefers_explicit_then_env(monkeypatch: pytest.MonkeyPatch) -> 
     assert cli.discover(None, None).base_url == "http://from-env:1234"
 
 
+def test_discover_honours_configured_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A configured ZIBBO_PORT pins the location over probing the common ports — the single
+    # source of truth the spawned gateway resolves the same way.
+    monkeypatch.delenv("ZIBBO_GATEWAY_URL", raising=False)
+    monkeypatch.setenv("ZIBBO_PORT", "8137")
+    assert cli.discover(None, None).base_url == "http://127.0.0.1:8137"
+
+
+def test_doctor_reports_configuration_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    # DX: doctor names which configuration source resolved the gateway URL, so an
+    # inconsistent env/.env setup is diagnosable rather than silent.
+    monkeypatch.delenv("ZIBBO_GATEWAY_URL", raising=False)
+    monkeypatch.setenv("ZIBBO_PORT", "8137")
+    with _ForeignServer(body=b"x", content_type="text/plain") as srv:
+        # Point the client at the foreign server's port but keep ZIBBO_PORT as the source
+        # label under test; connectivity will fail cleanly, configuration still reports.
+        checks = cli._build_doctor_checks(cli.Client(f"http://127.0.0.1:{srv.port}"))
+    config = next(c for c in checks if c["name"] == "configuration")
+    assert config["status"] == "ok"
+    assert "ZIBBO_PORT" in config["detail"]
+
+
 def test_parser_accepts_every_subcommand() -> None:
     parser = cli.build_parser()
     for command in (
@@ -590,6 +612,68 @@ def test_port_is_occupied_detects_a_listening_socket() -> None:
         assert cli._port_is_occupied(f"http://127.0.0.1:{port}") is True
     # Socket closed — nothing listens, so the port reads free again.
     assert cli._port_is_occupied(f"http://127.0.0.1:{port}") is False
+
+
+class _ForeignServer:
+    """A non-Zibbo HTTP server on an ephemeral port, for gateway-detection tests."""
+
+    def __init__(self, *, body: bytes, content_type: str) -> None:
+        import http.server
+        import socketserver
+        import threading
+
+        handler_body, handler_ct = body, content_type
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # stdlib handler API
+                self.send_response(200)
+                self.send_header("content-type", handler_ct)
+                self.end_headers()
+                self.wfile.write(handler_body)
+
+            def log_message(self, *args: object) -> None:  # silence
+                pass
+
+        self._srv = socketserver.TCPServer(("127.0.0.1", 0), _Handler)
+        self.port = self._srv.server_address[1]
+        threading.Thread(target=self._srv.serve_forever, daemon=True).start()
+
+    def __enter__(self) -> _ForeignServer:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._srv.shutdown()
+        self._srv.server_close()
+
+
+def test_reachable_false_when_foreign_server_returns_non_json() -> None:
+    # A stray dev server (HTML) on the gateway port must not crash the CLI — reachable() has
+    # to return False cleanly, not raise JSONDecodeError up through doctor/status/start.
+    with _ForeignServer(body=b"<html>not zibbo</html>", content_type="text/html") as srv:
+        assert cli.Client(f"http://127.0.0.1:{srv.port}").reachable() is False
+
+
+def test_reachable_false_when_foreign_server_returns_unrelated_json() -> None:
+    # Valid JSON, but not Zibbo's version payload — reachable() must not be fooled into a
+    # false positive that makes `start` say "already running".
+    with _ForeignServer(body=b'{"hello":"other api"}', content_type="application/json") as srv:
+        assert cli.Client(f"http://127.0.0.1:{srv.port}").reachable() is False
+
+
+def test_reachable_true_only_with_zibbo_version_payload() -> None:
+    payload = b'{"app_name":"zibbo","gateway_version":"0.1.1","internal_api_version":"1"}'
+    with _ForeignServer(body=payload, content_type="application/json") as srv:
+        assert cli.Client(f"http://127.0.0.1:{srv.port}").reachable() is True
+
+
+def test_doctor_connectivity_names_a_foreign_occupied_port() -> None:
+    # Issue #9: a non-Zibbo service on the port must not read as a bare "no gateway".
+    with _ForeignServer(body=b"<html>nope</html>", content_type="text/html") as srv:
+        checks = cli._build_doctor_checks(cli.Client(f"http://127.0.0.1:{srv.port}"))
+    conn = next(c for c in checks if c["name"] == "connectivity")
+    assert conn["status"] == "fail"
+    assert "non-Zibbo service" in conn["detail"]
+    assert "occupied" in str(conn["problem"])
 
 
 def test_report_startup_failure_surfaces_exit_code_and_log_tail(

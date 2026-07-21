@@ -16,7 +16,7 @@ from typing import Annotated, Any, Self
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from gateway import __version__
+from gateway import __version__, endpoint
 
 ENV_PREFIX = "ZIBBO_"
 
@@ -94,8 +94,11 @@ class Settings(BaseSettings):
     environment: Environment = Environment.DEVELOPMENT
 
     # -- Server ------------------------------------------------------------
+    # The server binds broadly (bind-all in a container); a *client* connects to loopback.
+    # Those are two correct-but-different hosts, so only the client default is centralized
+    # (gateway.endpoint.DEFAULT_HOST). The port default is shared, so CLI and server agree.
     host: str = "0.0.0.0"  # noqa: S104 — bind-all is intended inside a container
-    port: Annotated[int, Field(ge=1, le=65535)] = 8000
+    port: Annotated[int, Field(ge=1, le=65535)] = endpoint.DEFAULT_PORT
     root_path: str = ""
     """Mount prefix when running behind a path-rewriting proxy."""
 
