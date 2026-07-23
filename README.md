@@ -2,7 +2,7 @@
 
 <img src="docs/assets/avatar.png" alt="Zibbo" width="140" height="140" />
 
-# Zibbo
+#Zibbo
 
 **Cut the token cost of your AI coding assistant — losslessly, on your own machine.**
 
